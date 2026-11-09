@@ -186,27 +186,56 @@ export async function savePrivateMetadata(params: {
     portfolioImageId
   } = params;
 
-  await setFirestoreDocument({
-    collectionPath: "image-private-metadata",
-    documentId: privateMetadataId,
-    idToken,
-    data: {
-      privateMetadataId,
-      userId,
-      imagePath,
-      imageUrl,
-      type: "post",
-      publicDocPath,
-      exif,
-      createdAt: new Date(),
-      schemaVersion: 1,
-      portfolioImageId: portfolioImageId || null
-    }
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const docPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/image-private-metadata/${privateMetadataId}`;
+
+  const fields: Record<string, any> = {
+    privateMetadataId: toFirestoreValue(privateMetadataId),
+    userId: toFirestoreValue(userId),
+    imagePath: toFirestoreValue(imagePath),
+    imageUrl: toFirestoreValue(imageUrl),
+    type: toFirestoreValue("post"),
+    publicDocPath: toFirestoreValue(publicDocPath),
+    exif: toFirestoreValue(exif),
+    schemaVersion: { integerValue: "1" }
+  };
+
+  if (portfolioImageId) {
+    fields.portfolioImageId = toFirestoreValue(portfolioImageId);
+  }
+
+  const response = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: docPath,
+            fields
+          },
+          updateTransforms: [
+            {
+              fieldPath: "createdAt",
+              setToServerValue: "REQUEST_TIME"
+            }
+          ]
+        }
+      ]
+    })
   });
+
+  if (!response.ok) {
+    const err = (await response.json()) as any;
+    throw new Error(`Failed to save image-private-metadata: ${err.error?.message || response.statusText}`);
+  }
 }
 
 /**
- * Writes the main public post document to `posts/<postId>`
+ * Writes the main public post document to `posts/<postId>` matching Foto schema and server timestamp
  */
 export async function savePostDocument(params: {
   postId: string;
@@ -237,37 +266,61 @@ export async function savePostDocument(params: {
     idToken
   } = params;
 
-  await setFirestoreDocument({
-    collectionPath: "posts",
-    documentId: postId,
-    idToken,
-    data: {
-      postId,
-      userId,
-      type: "post",
-      imageUrl,
-      imagePath,
-      imageWidth,
-      imageHeight,
-      description,
-      tags,
-      timeStamp: new Date(),
-      likes: [],
-      commentCount: 0,
-      nudityRating,
-      violenceRating: 0.0,
-      privateMetadataId,
-      language: "en",
-      languageTextHash: "",
-      images: images || null,
-      coverAlignmentX: null,
-      coverImageId: null,
-      title: null,
-      isActive: true,
-      inactiveReason: null,
-      inactiveSince: null
-    }
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const docPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${postId}`;
+
+  const fields: Record<string, any> = {
+    userId: toFirestoreValue(userId),
+    postId: toFirestoreValue(postId),
+    type: toFirestoreValue("post"),
+    imageUrl: toFirestoreValue(imageUrl),
+    imagePath: toFirestoreValue(imagePath),
+    imageWidth: { doubleValue: imageWidth },
+    imageHeight: { doubleValue: imageHeight },
+    description: toFirestoreValue(description),
+    tags: toFirestoreValue(tags),
+    likes: toFirestoreValue([]),
+    commentCount: { integerValue: "0" },
+    nudityRating: { doubleValue: nudityRating },
+    violenceRating: { doubleValue: 0.0 },
+    privateMetadataId: toFirestoreValue(privateMetadataId),
+    images: images ? toFirestoreValue(images) : { nullValue: null },
+    coverAlignmentX: { nullValue: null },
+    coverImageId: { nullValue: null },
+    title: { nullValue: null },
+    isActive: toFirestoreValue(true),
+    inactiveReason: { nullValue: null },
+    inactiveSince: { nullValue: null }
+  };
+
+  const response = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: docPath,
+            fields
+          },
+          updateTransforms: [
+            {
+              fieldPath: "timeStamp",
+              setToServerValue: "REQUEST_TIME"
+            }
+          ]
+        }
+      ]
+    })
   });
+
+  if (!response.ok) {
+    const err = (await response.json()) as any;
+    throw new Error(`Failed to save post document: ${err.error?.message || response.statusText}`);
+  }
 }
 
 /**

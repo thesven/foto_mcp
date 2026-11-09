@@ -164,18 +164,7 @@ export class FotoClient {
     const postId = generateFotoPostId(userId);
     const privateMetadataId = crypto.randomUUID();
 
-    // 7. Save image-private-metadata (EXIF and technical details)
-    await savePrivateMetadata({
-      privateMetadataId,
-      userId,
-      imagePath: storageResult.imagePath,
-      imageUrl: storageResult.imageUrl,
-      publicDocPath: `posts/${postId}`,
-      exif: prepared.exif,
-      idToken
-    });
-
-    // 8. Save main post document in posts collection
+    // 7. Save main post document in posts collection
     await savePostDocument({
       postId,
       userId,
@@ -187,6 +176,17 @@ export class FotoClient {
       tags: validatedTags,
       nudityRating: moderation.nudityRating,
       privateMetadataId,
+      idToken
+    });
+
+    // 8. Save image-private-metadata (EXIF and technical details)
+    await savePrivateMetadata({
+      privateMetadataId,
+      userId,
+      imagePath: storageResult.imagePath,
+      imageUrl: storageResult.imageUrl,
+      publicDocPath: `posts/${postId}`,
+      exif: prepared.exif,
       idToken
     });
 
