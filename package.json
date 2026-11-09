@@ -1,0 +1,42 @@
+{
+  "name": "foto_mcp",
+  "version": "0.1.0",
+  "description": "An MCP (Model Context Protocol) server for Foto App",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "foto-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx test/test.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thesven/foto_mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "foto",
+    "foto-app",
+    "photography",
+    "exif"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "dotenv": "^18.0.10",
+    "exifr": "^7.1.3",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
