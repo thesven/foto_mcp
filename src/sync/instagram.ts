@@ -48,11 +48,16 @@ export interface SyncReport {
  */
 function unescapeHtml(text: string): string {
   return text
+    .replace(/&#10;/g, "\n")
+    .replace(/&#13;/g, "\r")
     .replace(/&#039;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ")
     .replace(/&#064;/g, "@");
 }
 
@@ -63,7 +68,7 @@ export function parseInstagramPostsHtml(htmlContent: string): ParsedInstagramPos
   const posts: ParsedInstagramPost[] = [];
   
   // Each post is contained inside a post container div
-  const postRegex = /<div class="[^"]*uiBoxWhite[^"]*">([\s\S]*?)<\/div><\/div>/g;
+  const postRegex = /<div class="[^"]*uiBoxWhite[^"]*">([\s\S]*?)(?=(?:<div class="[^"]*uiBoxWhite)|$)/g;
   let match: RegExpExecArray | null;
 
   while ((match = postRegex.exec(htmlContent)) !== null) {
@@ -84,8 +89,8 @@ export function parseInstagramPostsHtml(htmlContent: string): ParsedInstagramPos
 
     // Extract GPS if recorded by Instagram
     let gpsDetected: { lat: number; lng: number } | undefined;
-    const latMatch = postHtml.match(/Latitude<\/div><div><div class="_a6-q">([0-9.-]+)<\/div>/);
-    const lngMatch = postHtml.match(/Longitude<\/div><div><div class="_a6-q">([0-9.-]+)<\/div>/);
+    const latMatch = postHtml.match(/Latitude[\s\S]*?class="[^"]*_a6-q[^"]*">([0-9.-]+)<\/div>/i);
+    const lngMatch = postHtml.match(/Longitude[\s\S]*?class="[^"]*_a6-q[^"]*">([0-9.-]+)<\/div>/i);
     if (latMatch && lngMatch) {
       gpsDetected = {
         lat: parseFloat(latMatch[1]),

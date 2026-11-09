@@ -5,12 +5,13 @@ import { z } from "zod";
 import { FotoClient } from "./foto-client.js";
 import { signInWithEmailAndPassword, clearCredentials, getAuthStatus } from "./api/auth.js";
 import { searchTags, suggestTags, FOTO_ALLOWED_TAGS } from "./tags.js";
+import { InstagramSyncTool } from "./sync/instagram.js";
 
 const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "0.1.0"
+  version: "1.0.0"
 });
 
 // Tool 1: foto_auth_status
@@ -308,8 +309,6 @@ server.tool(
   }
 );
 
-import { InstagramSyncTool } from "./sync/instagram.js";
-
 // Tool 11: foto_sync_instagram
 server.tool(
   "foto_sync_instagram",
@@ -356,6 +355,57 @@ server.tool(
         content: [{ type: "text", text: `Instagram sync failed: ${err.message}` }]
       };
     }
+  }
+);
+
+// MCP Resource: Official 303 Curated Allowed Tags Whitelist
+server.registerResource(
+  "foto-curated-tags",
+  "foto://curated-tags",
+  {
+    title: "Foto Official Curated Tags",
+    description: "The complete whitelist of 303 curated tags permitted on Foto.",
+    mimeType: "application/json"
+  },
+  async () => {
+    return {
+      contents: [
+        {
+          uri: "foto://curated-tags",
+          mimeType: "application/json",
+          text: JSON.stringify(FOTO_ALLOWED_TAGS, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt: Formulate & Curate a Foto Post
+server.registerPrompt(
+  "curate_foto_post",
+  {
+    title: "Curate and Prepare Foto Post",
+    description: "Formulate a thoughtful photographic post for Foto adhering to platform ethos (no hashtags, 1-3 curated tags, technical EXIF summary)."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please help me prepare a photo for publishing to Foto (https://fotoapp.co/).
+
+Here are the Foto guidelines to follow:
+1. Pure photography focus: Inspect the photo with foto_inspect_image to check aspect ratio, geometry, and technical EXIF (camera, lens, shutter, aperture, ISO).
+2. Curated tags only: Choose 1 to 3 tags strictly from the 303 allowed curated tags list (use foto_suggest_tags or foto_search_tags). Never include Instagram-style hashtags or spam tags.
+3. Narrative & Context: Draft a thoughtful caption discussing the creative intent, subject, location, or technical conditions.
+4. Privacy: GPS data will be automatically stripped upon publishing.
+5. Review draft: Preview the post with foto_draft_post before publishing live with foto_publish_post.`
+          }
+        }
+      ]
+    };
   }
 );
 

@@ -3,22 +3,17 @@ import { FotoClient } from "../src/foto-client.js";
 async function run() {
   console.log("=== FOTO MCP: PUBLISHING LIVE POST TO FOTO APP ===");
 
+  const filePath = process.argv[2];
+  if (!filePath) {
+    console.log("\nUsage:\n  npx tsx scripts/publish_live_post.ts <image-path> [caption] [tags...]");
+    console.log("\nExample:\n  npx tsx scripts/publish_live_post.ts ~/Photos/sunset.jpg \"Golden hour over the lake\" \"Landscape\" \"Golden Hour\"\n");
+    process.exit(1);
+  }
+
+  const caption = process.argv[3] || "Captured on a quiet morning.";
+  const tags = process.argv.slice(4).length > 0 ? process.argv.slice(4) : ["Everyday Life"];
+
   const client = new FotoClient();
-
-  const filePath = "/tmp/18113309399234410.jpg";
-  const caption = `🐿️ American Red Squirrel (Peeking)
-
-Tamiasciurus hudsonicus
-
-Ever have the feeling you're the one being watched? I was out watching some deer in the morning and turn around to see this guy watching me watching them.
-
-Fair enough, too — red squirrels are famously territorial and will scold anything that wanders into their patch, humans included.
-
-📷 ISO 2000 · 300mm · f/2.8 · 1/1000s
-
-📌 Southern Ontario`;
-
-  const tags = ["Wildlife", "Animals", "Nature"];
 
   console.log("Image File:", filePath);
   console.log("Tags:", tags);

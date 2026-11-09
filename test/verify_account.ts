@@ -3,8 +3,13 @@ import { fetchUserProfile } from "../src/api/firestore.js";
 
 async function run() {
   console.log("=== Testing Foto Live Authentication ===");
-  const email = process.env.FOTO_EMAIL || "michael@mikesvendsen.net";
+  const email = process.env.FOTO_EMAIL;
   const password = process.env.FOTO_PASSWORD;
+
+  if (!email) {
+    console.error("Please set FOTO_EMAIL (and optionally FOTO_PASSWORD) in your environment before running this verification script.");
+    process.exit(1);
+  }
 
   try {
     let creds;

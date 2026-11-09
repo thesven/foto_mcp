@@ -26,14 +26,26 @@ async function main() {
     console.log("Warning: Could not fetch profile, running without remote deduplication check:", err.message);
   }
 
-  console.log("\n--- TEST 1: Dry run on Latest Export (posts_1.html) ---");
-  const reportLatest = await syncTool.runSync({
-    htmlFilePath: "/tmp/posts_1.html",
-    mediaDir: "/tmp",
-    maxPosts: 5,
-    dryRun: true,
-    existingFotoCaptions
-  });
+  const htmlFilePath = process.argv[2] || "/tmp/posts_1.html";
+  const mediaDir = process.argv[3] || path.dirname(htmlFilePath);
+
+  console.log(`Target Instagram HTML: ${htmlFilePath}`);
+  console.log(`Media directory: ${mediaDir}`);
+
+  let reportLatest;
+  try {
+    reportLatest = await syncTool.runSync({
+      htmlFilePath,
+      mediaDir,
+      maxPosts: 5,
+      dryRun: true,
+      existingFotoCaptions
+    });
+  } catch (err: any) {
+    console.error(`\nCould not open Instagram HTML export at "${htmlFilePath}":`, err.message);
+    console.log("\nUsage:\n  npx tsx scripts/dry_run_instagram_sync.ts <path-to-posts_1.html> [media-directory]\n");
+    process.exit(0);
+  }
 
   console.log(`Total parsed posts: ${reportLatest.totalParsed}`);
   console.log(`Ready to publish (dry run): ${reportLatest.readyToPublish}`);
@@ -55,21 +67,25 @@ async function main() {
     console.log("-------------------------------------------------\n");
   }
 
-  console.log("\n--- TEST 2: Dry run on Earlier Wildlife Batch (posts_earlier.html) ---");
-  const reportEarlier = await syncTool.runSync({
-    htmlFilePath: "/tmp/posts_earlier.html",
-    mediaDir: "/tmp",
-    maxPosts: 12,
-    dryRun: true,
-    existingFotoCaptions
-  });
+  try {
+    const reportEarlier = await syncTool.runSync({
+      htmlFilePath: "/tmp/posts_earlier.html",
+      mediaDir: "/tmp",
+      maxPosts: 12,
+      dryRun: true,
+      existingFotoCaptions
+    });
 
-  console.log(`Total parsed posts: ${reportEarlier.totalParsed}`);
-  console.log(`Already on Foto (Deduplicated): ${reportEarlier.alreadyPublishedCount}`);
-  console.log(`Candidates summary:`);
-  reportEarlier.candidates.forEach((c, idx) => {
-    console.log(`  ${idx + 1}. [${c.status}] "${c.post.title}" -> Tags: [${c.suggestedTags.join(", ")}] ${c.isAlreadyPublished ? "(DUPLICATE DETECTED)" : ""}`);
-  });
+    console.log("\n--- TEST 2: Dry run on Earlier Wildlife Batch (posts_earlier.html) ---");
+    console.log(`Total parsed posts: ${reportEarlier.totalParsed}`);
+    console.log(`Already on Foto (Deduplicated): ${reportEarlier.alreadyPublishedCount}`);
+    console.log(`Candidates summary:`);
+    reportEarlier.candidates.forEach((c, idx) => {
+      console.log(`  ${idx + 1}. [${c.status}] "${c.post.title}" -> Tags: [${c.suggestedTags.join(", ")}] ${c.isAlreadyPublished ? "(DUPLICATE DETECTED)" : ""}`);
+    });
+  } catch {
+    // Optional second test file not present, ignore
+  }
 
   console.log("\n=================================================");
   console.log("             DRY RUN COMPLETED SUCCESSFULLY       ");

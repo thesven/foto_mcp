@@ -56,6 +56,20 @@ export FOTO_PASSWORD="your_password"
 
 ## Configuration
 
+### Quick Start via `npx` (No local build required)
+You can run `foto-mcp` directly without cloning or building locally:
+
+```json
+{
+  "mcpServers": {
+    "foto": {
+      "command": "npx",
+      "args": ["-y", "foto_mcp"]
+    }
+  }
+}
+```
+
 ### Claude Desktop
 Add this to your Claude Desktop configuration file:
 * **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
@@ -66,8 +80,8 @@ Add this to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "foto": {
-      "command": "node",
-      "args": ["/path/to/foto_mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "foto_mcp"],
       "env": {
         "FOTO_EMAIL": "your_email@example.com",
         "FOTO_PASSWORD": "your_password"
@@ -78,13 +92,41 @@ Add this to your Claude Desktop configuration file:
 ```
 
 ### Cursor
-Add to your project's `.cursor/mcp.json` or Global Cursor settings:
+Add to `.cursor/mcp.json` or your Global Cursor MCP settings:
 ```json
 {
   "mcpServers": {
     "foto": {
-      "command": "node",
-      "args": ["/path/to/foto_mcp/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "foto_mcp"]
+    }
+  }
+}
+```
+
+### Zed Editor
+Add to `~/.config/zed/settings.json`:
+```json
+{
+  "experimental.model_context_protocol": {
+    "servers": {
+      "foto": {
+        "command": "npx",
+        "args": ["-y", "foto_mcp"]
+      }
+    }
+  }
+}
+```
+
+### Windsurf
+Add to `~/.codeium/windsurf/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "foto": {
+      "command": "npx",
+      "args": ["-y", "foto_mcp"]
     }
   }
 }
@@ -106,6 +148,17 @@ Add to your project's `.cursor/mcp.json` or Global Cursor settings:
 | `foto_publish_post` | Normalizes, scrubs GPS, uploads, and publishes a single photo. Supports `dryRun: true`. | `filePath`, `caption`, `tags`, `dryRun` |
 | `foto_publish_series` | Publishes a multi-image Series (2 to 5 photos) under one post. Supports `dryRun: true`. | `filePaths`, `caption`, `tags`, `dryRun` |
 | `foto_get_user_profile` | Retrieves current user's profile info and stats. | None |
+| `foto_sync_instagram` | Migrates posts from an Instagram HTML export: cleans hashtags, suggests curated tags, strips GPS, deduplicates against published posts. | `htmlFilePath`, `mediaDir`, `maxPosts`, `dryRun` |
+
+---
+
+## MCP Resources & Prompts
+
+### Resources
+* **`foto://curated-tags`**: Exposes the complete JSON array of all 303 official curated tags permitted on Foto for client-side caching and autocomplete.
+
+### Prompts
+* **`curate_foto_post`**: A structured prompt guiding the AI assistant to inspect image EXIF, suggest canonical tags, craft a thoughtful caption, and preview drafts according to Foto community guidelines.
 
 ---
 
@@ -165,13 +218,46 @@ Claude runs `foto_publish_post` with `dryRun: true`:
 
 Claude runs `foto_publish_post` without `dryRun`, and your photo is live on your chronological Foto feed.
 
+### 5. Synchronizing from Instagram Data Export
+> *"Can you analyze my Instagram export at `/path/to/posts_1.html` and preview what can be migrated to Foto?"*
+
+Claude runs `foto_sync_instagram`:
+```json
+{
+  "dryRun": true,
+  "totalParsed": 12,
+  "readyToPublish": 10,
+  "alreadyPublishedCount": 2,
+  "candidates": [
+    {
+      "post": { "title": "Red Fox in Snow", "hashtags": ["fox", "wildlife", "winter"] },
+      "suggestedTags": ["Wildlife", "Animals", "Winter"],
+      "gpsScrubbed": true,
+      "status": "READY"
+    }
+  ]
+}
+```
+
+---
+
+## Environment Variables
+
+| Variable | Description | Required? |
+| :--- | :--- | :--- |
+| `FOTO_EMAIL` | Account email for Foto. If set, enables headless login without manual in-chat auth. | Optional |
+| `FOTO_PASSWORD` | Account password for Foto. | Optional |
+
+> **Note:** Credentials can also be authenticated on-the-fly via the `foto_login` MCP tool. Session tokens are securely cached locally at `~/.config/foto-mcp/credentials.json` with strict user-only read/write permissions (`0600`).
+
 ---
 
 ## Testing & Quality Assurance
 
-Run the built-in test suite:
+Run the automated test suite and type check:
 ```bash
 npm test
+npm run typecheck
 ```
 The test suite validates:
 * Exact 303 tag whitelist integrity & case-insensitive canonical normalization.
@@ -181,6 +267,24 @@ The test suite validates:
 * Image geometry, aspect-ratio formatting, and sharp 1820px downsampling.
 * Dry-run single post and multi-image series authoring.
 * Unauthenticated session handling.
+* Draft post preview and validation.
+* Multi-image series boundaries (enforces 2 to 5 images).
+* Instagram export HTML parsing, newline decoding, and GPS stripping.
+
+---
+
+## Troubleshooting
+
+### Token Expired or Authentication Error
+* Run `foto_auth_status` to inspect current credentials.
+* If your token expired or password changed, call `foto_login` with your credentials or update `FOTO_EMAIL` and `FOTO_PASSWORD` in your environment.
+* To reset all local credentials, call `foto_logout` or delete `~/.config/foto-mcp/credentials.json`.
+
+### Image Rejected by Moderation
+* Foto automatically checks images using Sightengine (`nudity-2.1`). If an image exceeds platform thresholds (sexual activity > 0.7 or sexual display > 0.9), it will be rejected to protect your account standing.
+
+### Format Not Supported
+* Foto strictly supports still photography (JPEG, PNG, WebP, TIFF, HEIC). Animated GIFs and video are not permitted.
 
 ---
 

@@ -8,6 +8,7 @@ import { inspectImage, prepareImageForUpload } from "../src/media/processor.js";
 import { FotoClient } from "../src/foto-client.js";
 import { generateFotoPostId } from "../src/api/firestore.js";
 import { getAuthStatus } from "../src/api/auth.js";
+import { parseInstagramPostsHtml } from "../src/sync/instagram.js";
 
 async function runTests() {
   console.log("=== Running Foto MCP Test Suite ===\n");
@@ -143,6 +144,68 @@ async function runTests() {
   console.log("  Auth status:", authStatus.message);
   assert(typeof authStatus.loggedIn === "boolean");
   console.log("  ✓ Auth status passed");
+
+  // Test 8: Draft Post preview validation
+  console.log("\nTest 8: Draft post validation");
+  const draft = await client.draftPost({
+    filePath: testImagePath,
+    caption: "A quiet moment in the mountains.",
+    tags: ["Landscape", "Mountains"]
+  });
+  assert.strictEqual(draft.readyToPublish, true);
+  assert.strictEqual(draft.canonicalTags.length, 2);
+  assert.strictEqual(draft.dimensions.uploadTargetWidth, 1820);
+  console.log("  ✓ Draft post validation passed");
+
+  // Test 9: Series boundaries enforcement (reject < 2 or > 5)
+  console.log("\nTest 9: Series image count boundaries");
+  await assert.rejects(
+    async () => {
+      await client.publishSeries({
+        filePaths: [testImagePath],
+        caption: "Only one image",
+        tags: ["Landscape"],
+        dryRun: true
+      });
+    },
+    /at least 2 photos/,
+    "Must reject series with fewer than 2 images"
+  );
+
+  await assert.rejects(
+    async () => {
+      await client.publishSeries({
+        filePaths: [testImagePath, testImagePath, testImagePath, testImagePath, testImagePath, testImagePath],
+        caption: "Six images",
+        tags: ["Landscape"],
+        dryRun: true
+      });
+    },
+    /maximum of 5 photos/,
+    "Must reject series with more than 5 images"
+  );
+  console.log("  ✓ Series boundary checks passed");
+
+  // Test 10: Instagram export HTML parsing
+  console.log("\nTest 10: Instagram HTML export parsing");
+  const mockInstagramHtml = `
+    <div class="uiBoxWhite">
+      <h2>Mallard Drake on the Grand River&#039;s edge.&#10;&#10;📷 300mm · f/2.8 · 1/1000s&#10;&#10;#bird #wildlife #nature #canon</h2>
+      <img src="media/posts/202611/duck.jpg" />
+      <div class="_a6-o">Nov 9, 2026 8:00am</div>
+      <div>Latitude</div><div><div class="_a6-q">43.4516</div></div>
+      <div>Longitude</div><div><div class="_a6-q">-80.4925</div></div>
+    </div></div>
+  `;
+  const parsedInstagram = parseInstagramPostsHtml(mockInstagramHtml);
+  assert.strictEqual(parsedInstagram.length, 1);
+  assert.strictEqual(parsedInstagram[0].title, "Mallard Drake on the Grand River's edge.");
+  assert.strictEqual(parsedInstagram[0].imageFileName, "duck.jpg");
+  assert.strictEqual(parsedInstagram[0].gpsDetected?.lat, 43.4516);
+  assert.deepStrictEqual(parsedInstagram[0].hashtags, ["bird", "wildlife", "nature", "canon"]);
+  assert(parsedInstagram[0].cleanedCaption.includes("📷 300mm · f/2.8 · 1/1000s"));
+  assert(!parsedInstagram[0].cleanedCaption.includes("#bird"), "Hashtags must be scrubbed from caption");
+  console.log("  ✓ Instagram export HTML parsing passed");
 
   // Clean up test files
   await fs.rm(tempDir, { recursive: true, force: true });

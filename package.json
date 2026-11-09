@@ -1,17 +1,29 @@
 {
   "name": "foto_mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "An MCP (Model Context Protocol) server for Foto App",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "foto-mcp": "./dist/index.js"
+    "foto-mcp": "./dist/index.js",
+    "foto_mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "tags.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
   },
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "tsx test/test.ts"
+    "test": "tsx test/test.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "repository": {
     "type": "git",
