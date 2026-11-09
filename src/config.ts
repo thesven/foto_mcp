@@ -35,6 +35,10 @@ export const PLATFORM_LIMITS = {
 };
 
 export const CONFIG_PATHS = {
-  configDir: path.join(os.homedir(), ".config", "foto-mcp"),
-  credentialsFile: path.join(os.homedir(), ".config", "foto-mcp", "credentials.json")
+  get configDir(): string {
+    return process.env.FOTO_CONFIG_DIR || path.join(os.homedir(), ".config", "foto-mcp");
+  },
+  get credentialsFile(): string {
+    return path.join(this.configDir, "credentials.json");
+  }
 };

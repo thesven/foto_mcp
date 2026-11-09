@@ -3,8 +3,10 @@ process.env.FOTO_MCP_TEST = "true";
 
 import assert from "node:assert";
 import fs from "node:fs/promises";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
+
+process.env.FOTO_CONFIG_DIR = path.join(os.tmpdir(), `foto-mcp-test-${Date.now()}`);
 import sharp from "sharp";
 import { validateTags, searchTags, suggestTags, FOTO_ALLOWED_TAGS } from "../src/tags.js";
 import { inspectImage, prepareImageForUpload } from "../src/media/processor.js";

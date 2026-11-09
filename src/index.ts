@@ -415,6 +415,41 @@ server.tool(
   }
 );
 
+// Tool 14: foto_follow_user
+server.tool(
+  "foto_follow_user",
+  "Follow one or more photographers on Foto by their user ID(s). Atomically updates following and followers lists.",
+  {
+    userId: z.string().optional().describe("A single photographer userId to follow"),
+    userIds: z.array(z.string()).optional().describe("An array of photographer userIds to follow in batch")
+  },
+  async ({ userId, userIds }) => {
+    try {
+      if (userId) {
+        const result = await client.followUser(userId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      }
+      if (userIds && userIds.length > 0) {
+        const result = await client.followUsers(userIds);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: "Please provide either userId or userIds to follow." }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to follow user(s): ${err.message}` }]
+      };
+    }
+  }
+);
+
 // MCP Resource: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",

@@ -5,6 +5,20 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-09
+
+### Added
+- **Social Graph & Follow Tools (14 Total MCP Tools)**:
+  - `foto_follow_user`: Follow photographers individually by `userId` or in bulk by `userIds`.
+  - Implemented atomic Cloud Firestore `:commit` transforms using `appendMissingElements` to concurrently update both the current user's `following` array and target users' `followers` arrays without race conditions or duplicate entries.
+  - Implemented `unfollowUser` and `unfollowUserInFirestore` utilizing `removeAllFromArray` transforms.
+- **Client Follow Suite**:
+  - Added `client.followUser(userId)`, `client.followUsers(userIds)`, and `client.unfollowUser(userId)` to `FotoClient`.
+- **Test Suite & Isolation Improvements**:
+  - Added unit test coverage for single, batch, and error conditions for `foto_follow_user` and Firestore atomic transforms.
+  - Isolated test credential storage using dynamic `process.env.FOTO_CONFIG_DIR`, ensuring local user login sessions remain intact across test runs.
+  - Test suite coverage maintained at >97%.
+
 ## [1.1.0] - 2026-11-09
 
 ### Added

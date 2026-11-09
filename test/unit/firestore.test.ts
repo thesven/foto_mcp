@@ -15,7 +15,9 @@ import {
   fetchTagIndexMeta,
   fetchTagShardPosts,
   fetchPostDocument,
-  fetchPostsDocuments
+  fetchPostsDocuments,
+  followUserInFirestore,
+  unfollowUserInFirestore
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -371,6 +373,16 @@ export async function runFirestoreTests() {
     assert.strictEqual(batchPosts.length, 2);
     assert.strictEqual(batchPosts[0].userId, "u1");
     assert.strictEqual(batchPosts[1].userId, "u2");
+
+    // followUserInFirestore & unfollowUserInFirestore
+    globalThis.fetch = async (url: any, init: any) => {
+      return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    };
+    const followOk = await followUserInFirestore({ currentUserId: "me", targetUserId: "target", idToken: "tok" });
+    assert.strictEqual(followOk, true);
+
+    const unfollowOk = await unfollowUserInFirestore({ currentUserId: "me", targetUserId: "target", idToken: "tok" });
+    assert.strictEqual(unfollowOk, true);
 
   } finally {
     globalThis.fetch = originalFetch;

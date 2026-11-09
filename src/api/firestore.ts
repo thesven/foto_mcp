@@ -612,3 +612,110 @@ export async function fetchPostsDocuments(params: {
   const results = await Promise.all(fetchPromises);
   return results.filter((doc): doc is Record<string, any> => doc !== null && typeof doc === "object");
 }
+
+/**
+ * Follows a photographer on Foto by atomically updating the current user's following
+ * array and the target user's followers array.
+ */
+export async function followUserInFirestore(params: {
+  currentUserId: string;
+  targetUserId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const myDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${params.currentUserId}`;
+  const targetDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${params.targetUserId}`;
+
+  const res = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          transform: {
+            document: myDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "following",
+                appendMissingElements: {
+                  values: [{ stringValue: params.targetUserId }]
+                }
+              }
+            ]
+          }
+        },
+        {
+          transform: {
+            document: targetDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "followers",
+                appendMissingElements: {
+                  values: [{ stringValue: params.currentUserId }]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    })
+  });
+
+  return res.ok;
+}
+
+/**
+ * Unfollows a photographer on Foto by removing the target user from following and current user from followers.
+ */
+export async function unfollowUserInFirestore(params: {
+  currentUserId: string;
+  targetUserId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const myDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${params.currentUserId}`;
+  const targetDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${params.targetUserId}`;
+
+  const res = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          transform: {
+            document: myDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "following",
+                removeAllFromArray: {
+                  values: [{ stringValue: params.targetUserId }]
+                }
+              }
+            ]
+          }
+        },
+        {
+          transform: {
+            document: targetDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "followers",
+                removeAllFromArray: {
+                  values: [{ stringValue: params.currentUserId }]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    })
+  });
+
+  return res.ok;
+}

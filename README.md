@@ -1,14 +1,14 @@
 # Foto MCP Server (`foto_mcp`)
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-97.8%25-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-97.9%25-brightgreen.svg)]()
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-orange.svg)]()
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
 
 An official Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
 
-This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed, and discover photographers across Foto's 303 curated tags.
+This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed, discover photographers across Foto's 303 curated tags, and follow creators.
 
 ---
 
@@ -19,7 +19,7 @@ flowchart TD
     Client["AI Assistant / MCP Client<br>(Claude Desktop, Cursor, Zed, Windsurf)"]
     
     subgraph Foto_MCP ["Foto MCP Server (foto_mcp)"]
-        Tools["13 Native MCP Tools<br>& Resources / Prompts"]
+        Tools["14 Native MCP Tools<br>& Resources / Prompts"]
         Proc["Sharp & Exifr Media Pipeline<br>• Max 1820px Zero-Crop<br>• Strips GPS & Thumbnails<br>• Extracts Camera & Lens EXIF"]
         Auth["Firebase REST Auth<br>• Local Token Cache (chmod 0600)<br>• Auto Token Refresh (60s buffer)"]
         Sync["Instagram Migration Engine<br>• Cleans Hashtags<br>• Maps Curated Tags<br>• Deduplicates Posts"]
@@ -65,7 +65,7 @@ flowchart TD
 You can run `foto_mcp` directly without cloning or building locally:
 
 ```bash
-npx -y github:thesven/foto_mcp#v1.1.0
+npx -y github:thesven/foto_mcp#v1.2.0
 ```
 
 ---
@@ -83,7 +83,7 @@ Add this to your Claude Desktop configuration file:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"],
+      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"],
       "env": {
         "FOTO_EMAIL": "your_email@example.com",
         "FOTO_PASSWORD": "your_password"
@@ -100,7 +100,7 @@ Add to `.cursor/mcp.json` or your Global Cursor MCP settings:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
     }
   }
 }
@@ -114,7 +114,7 @@ Add to `~/.config/zed/settings.json`:
     "servers": {
       "foto": {
         "command": "npx",
-        "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
+        "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
       }
     }
   }
@@ -128,7 +128,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
     }
   }
 }
@@ -158,7 +158,7 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (13 Tools)
+## Complete MCP Tool Suite (14 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
@@ -170,6 +170,7 @@ export FOTO_PASSWORD="your_password"
 | `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query` (string), `limit?` (number, default: 20) |
 | `foto_browse_tag` | Browse recent public posts under any of Foto's 303 curated tags with shard and pagination support. | `tag` (string), `limit?` (number, default: 20), `shard?` (number) |
 | `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`, `Street`). Returns bios, stats, profile links, and sample works. | `tag` (string), `limit?` (number, default: 10) |
+| `foto_follow_user` | Follows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms (`appendMissingElements`). | `userId?` (string), `userIds?` (string[]) |
 | `foto_draft_post` | Validates a post draft before publishing: checks tag whitelist, calculates downsampled dimensions, and reviews EXIF summary. | `filePath` (string), `caption` (string), `tags` (string[]) |
 | `foto_publish_post` | Normalizes image (1820px), scrubs GPS, uploads to Storage, passes Sightengine moderation, and creates public Firestore post. | `filePath` (string), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
 | `foto_publish_series` | Publishes a multi-image sequential Series (2 to 5 photos) under one post. | `filePaths` (string[], min: 2, max: 5), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
@@ -288,6 +289,27 @@ Claude queries Foto's taxonomy with `foto_search_tags`, identifies canonical tag
           "tags": ["Fine Art Nude", "Medium Format", "Studio"]
         }
       ]
+    }
+  ]
+}
+```
+
+### 7. Following Photographers
+> *"Follow these photographers on Foto."*
+
+Claude invokes `foto_follow_user` with single `userId` or bulk `userIds`:
+```json
+{
+  "requestedCount": 2,
+  "followedCount": 2,
+  "results": [
+    {
+      "userId": "Cn6U0MyCMdZBXM2WhjTum1U01OE2",
+      "success": true
+    },
+    {
+      "userId": "cA0gINTjWoP5QJNuIGuCXizufsG3",
+      "success": true
     }
   ]
 }

@@ -14,7 +14,9 @@ import {
   fetchTagIndexMeta,
   fetchTagShardPosts,
   fetchPostDocument,
-  fetchPostsDocuments
+  fetchPostsDocuments,
+  followUserInFirestore,
+  unfollowUserInFirestore
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
 
@@ -594,6 +596,86 @@ export class FotoClient {
       tag: canonicalTag,
       photographerCount: photographers.length,
       photographers
+    };
+  }
+
+  /**
+   * Follows a single photographer on Foto by userId
+   */
+  async followUser(targetUserId: string): Promise<{ success: boolean; targetUserId: string; message: string }> {
+    if (!targetUserId || typeof targetUserId !== "string") {
+      throw new Error("Invalid targetUserId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    if (authSession.userId === targetUserId) {
+      throw new Error("Cannot follow yourself.");
+    }
+
+    const success = await followUserInFirestore({
+      currentUserId: authSession.userId,
+      targetUserId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      targetUserId,
+      message: success ? `Successfully followed user ${targetUserId}` : `Failed to follow user ${targetUserId}`
+    };
+  }
+
+  /**
+   * Follows multiple photographers on Foto by their userIds in batch
+   */
+  async followUsers(targetUserIds: string[]): Promise<{
+    requestedCount: number;
+    followedCount: number;
+    results: Array<{ userId: string; success: boolean }>;
+  }> {
+    const authSession = await getValidAuthSession();
+    const uniqueUids = Array.from(new Set(targetUserIds.filter(id => id && id !== authSession.userId)));
+
+    const results: Array<{ userId: string; success: boolean }> = [];
+    for (const targetUserId of uniqueUids) {
+      try {
+        const ok = await followUserInFirestore({
+          currentUserId: authSession.userId,
+          targetUserId,
+          idToken: authSession.idToken
+        });
+        results.push({ userId: targetUserId, success: ok });
+      } catch {
+        results.push({ userId: targetUserId, success: false });
+      }
+    }
+
+    const followedCount = results.filter(r => r.success).length;
+    return {
+      requestedCount: targetUserIds.length,
+      followedCount,
+      results
+    };
+  }
+
+  /**
+   * Unfollows a photographer on Foto by userId
+   */
+  async unfollowUser(targetUserId: string): Promise<{ success: boolean; targetUserId: string; message: string }> {
+    if (!targetUserId || typeof targetUserId !== "string") {
+      throw new Error("Invalid targetUserId provided.");
+    }
+    const authSession = await getValidAuthSession();
+
+    const success = await unfollowUserInFirestore({
+      currentUserId: authSession.userId,
+      targetUserId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      targetUserId,
+      message: success ? `Successfully unfollowed user ${targetUserId}` : `Failed to unfollow user ${targetUserId}`
     };
   }
 }

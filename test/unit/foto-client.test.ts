@@ -294,6 +294,32 @@ export async function runFotoClientTests() {
     assert.strictEqual(photogs.photographers[0].samplePostsUnderTag.length, 2);
     assert.strictEqual(photogs.photographers[1].username, "marcus_lens");
 
+    // 16. followUser, followUsers & unfollowUser
+    await saveCredentials({ userId: "u_me", idToken: "tok", refreshToken: "ref", expiresAt: Date.now() + 3600000 });
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+
+    const followRes = await client.followUser("u_target_1");
+    assert.strictEqual(followRes.success, true);
+    assert.strictEqual(followRes.targetUserId, "u_target_1");
+
+    await assert.rejects(async () => {
+      await client.followUser("u_me");
+    }, /Cannot follow yourself/);
+
+    await assert.rejects(async () => {
+      await client.followUser("");
+    }, /Invalid targetUserId provided/);
+
+    const followBatchRes = await client.followUsers(["u_target_1", "u_target_2", "u_me"]);
+    assert.strictEqual(followBatchRes.followedCount, 2);
+
+    const unfollowRes = await client.unfollowUser("u_target_1");
+    assert.strictEqual(unfollowRes.success, true);
+
+    await assert.rejects(async () => {
+      await client.unfollowUser("");
+    }, /Invalid targetUserId provided/);
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

@@ -192,6 +192,31 @@ export async function runMcpServerTests() {
     assert.strictEqual(findPhotogFail.isError, true);
     assert(findPhotogFail.content[0].text.includes("Failed to find photographers"));
 
+    // 16. Tool: foto_follow_user (single, batch, neither, and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes(":commit")) {
+        return new Response(JSON.stringify({ writeResults: [{}, {}] }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const followSingleRes = await tools.foto_follow_user.handler({ userId: "u_target_1" }, {} as any);
+    assert(!followSingleRes.isError);
+    assert(followSingleRes.content[0].text.includes("u_target_1"));
+
+    const followBatchRes = await tools.foto_follow_user.handler({ userIds: ["u_target_1", "u_target_2"] }, {} as any);
+    assert(!followBatchRes.isError);
+    assert(followBatchRes.content[0].text.includes("followedCount"));
+
+    const followNoArgRes = await tools.foto_follow_user.handler({}, {} as any);
+    assert.strictEqual(followNoArgRes.isError, true);
+    assert(followNoArgRes.content[0].text.includes("Please provide either userId or userIds"));
+
+    const followSelfRes = await tools.foto_follow_user.handler({ userId: "u_browse" }, {} as any);
+    assert.strictEqual(followSelfRes.isError, true);
+    assert(followSelfRes.content[0].text.includes("Cannot follow yourself"));
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });

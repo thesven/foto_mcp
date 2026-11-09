@@ -48,6 +48,9 @@ pip-delete-this-directory.txt
 # Unit test / coverage reports
 coverage/
 .c8_output/
+
+# Local scratch data
+scratch/
 htmlcov/
 .tox/
 .nox/
