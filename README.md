@@ -1,14 +1,14 @@
 # Foto MCP Server (`foto_mcp`)
 
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-97.9%25-brightgreen.svg)]()
-[![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-orange.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-96.1%25-brightgreen.svg)]()
+[![Node Version](https://img.shields.io/badge/node-%3E%3D20.9.0-orange.svg)]()
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
 
 An official Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
 
-This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed, discover photographers across Foto's 303 curated tags, and follow creators.
+This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, portfolios, watch local edit folders, or migrate archives from Instagram and Flickr directly to your chronological Foto feed, discover photographers across Foto's 303 curated tags, and backup complete vaults.
 
 ---
 
@@ -19,10 +19,10 @@ flowchart TD
     Client["AI Assistant / MCP Client<br>(Claude Desktop, Cursor, Zed, Windsurf)"]
     
     subgraph Foto_MCP ["Foto MCP Server (foto_mcp)"]
-        Tools["14 Native MCP Tools<br>& Resources / Prompts"]
-        Proc["Sharp & Exifr Media Pipeline<br>• Max 1820px Zero-Crop<br>• Strips GPS & Thumbnails<br>• Extracts Camera & Lens EXIF"]
+        Tools["29 Native MCP Tools<br>& Resources / Prompts"]
+        Proc["Sharp & Exifr Media Pipeline<br>• Max 1820px Zero-Crop<br>• sRGB Normalization<br>• Strips GPS & Thumbnails<br>• Extracts Camera & Lens EXIF"]
         Auth["Firebase REST Auth<br>• Local Token Cache (chmod 0600)<br>• Auto Token Refresh (60s buffer)"]
-        Sync["Instagram Migration Engine<br>• Cleans Hashtags<br>• Maps Curated Tags<br>• Deduplicates Posts"]
+        Sync["Migration & Archival Suite<br>• Instagram & Flickr Sync<br>• Vault Exporter & Backup<br>• Watch Folder Monitor"]
         Discovery["Discovery & Tag Query Engine<br>• Inverted Sharded Tag Index<br>• User Profile & Post Resolution"]
     end
     
@@ -134,6 +134,21 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
+### SSE / HTTP Remote Service Mode
+In addition to standard Stdio JSON-RPC, `foto_mcp` can run as a persistent Server-Sent Events (SSE) remote server:
+
+```bash
+# Start SSE server on default port 3000
+npx -y github:thesven/foto_mcp#main --transport sse --port 3000
+
+# Or via environment variables
+export MCP_TRANSPORT=sse
+export MCP_PORT=8080
+npx -y github:thesven/foto_mcp#main
+```
+
+Clients can connect via SSE endpoint: `http://localhost:3000/sse` (and POST messages to `/messages`).
+
 ---
 
 ## Authentication & Credentials Security
@@ -158,7 +173,7 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (27 Tools)
+## Complete MCP Tool Suite (29 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
@@ -189,6 +204,9 @@ export FOTO_PASSWORD="your_password"
 | `foto_get_photographer_profile` | Looks up any photographer's public profile on Foto by user ID or username handle (e.g. `@elena_fineart`). | `userId?` (string), `username?` (string) |
 | `foto_get_user_profile` | Retrieves current authenticated user's profile info, bio, and published post stats. | *None* |
 | `foto_sync_instagram` | Migrates posts from an Instagram HTML export: strips hashtags, maps curated tags, scrubs GPS, and checks against published posts. | `htmlFilePath` (string), `mediaDir?` (string), `maxPosts?` (number), `dryRun?` (boolean) |
+| `foto_sync_flickr` | Migrates photography archives from Flickr account JSON exports: maps tags, resolves local images, cleans descriptions, and deduplicates. | `exportPath` (string), `mediaDir?` (string), `maxPosts?` (number), `dryRun?` (boolean) |
+| `foto_export_vault` | Downloads a complete archival vault backup: original high-res photos, camera EXIF sidecars (`<postId>.json`), and master `manifest.json`. | `targetDirectory` (string), `limit?` (number), `dryRun?` (boolean) |
+| `foto_watch_directory` | Monitors studio output folder (Lightroom, Capture One) for new photos, extracts EXIF, generates sRGB previews, suggests tags, and drafts posts. | `directoryPath` (string), `autoDraft?` (boolean), `limit?` (number) |
 
 ---
 

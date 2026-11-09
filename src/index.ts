@@ -6,12 +6,15 @@ import { FotoClient } from "./foto-client.js";
 import { signInWithEmailAndPassword, clearCredentials, getAuthStatus } from "./api/auth.js";
 import { searchTags, suggestTags, FOTO_ALLOWED_TAGS } from "./tags.js";
 import { InstagramSyncTool } from "./sync/instagram.js";
+import { FlickrSyncTool } from "./sync/flickr.js";
+import { VaultExporter } from "./sync/vault.js";
+import { WatchFolderService } from "./sync/watcher.js";
 
 const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "1.5.0"
+  version: "2.0.0"
 });
 
 // Tool 1: foto_auth_status
@@ -788,6 +791,89 @@ server.tool(
   }
 );
 
+// Tool 27: foto_sync_flickr
+server.tool(
+  "foto_sync_flickr",
+  "Migrate and sync photo archives from a Flickr export (JSON account export or photo JSON files) to Foto. Normalizes tags to 303 whitelist, strips GPS, prevents duplicate republishing, and prepares 1820px zero-crop uploads. Supports dryRun=true (default).",
+  {
+    exportPath: z.string().describe("Path to Flickr export directory or JSON file"),
+    mediaDir: z.string().optional().describe("Directory containing extracted Flickr images (defaults to exportPath directory)"),
+    maxPhotos: z.number().int().positive().optional().describe("Maximum photos to process in this run (default: 20)"),
+    dryRun: z.boolean().optional().describe("If true (default), simulates migration without uploading or creating live posts"),
+    defaultTags: z.array(z.string()).optional().describe("Optional default tags to apply if none are suggested")
+  },
+  async ({ exportPath, mediaDir, maxPhotos = 20, dryRun = true, defaultTags }) => {
+    try {
+      const syncTool = new FlickrSyncTool(client);
+      const report = await syncTool.sync({
+        exportPath,
+        mediaDir,
+        maxPhotos,
+        dryRun,
+        defaultTags
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(report, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Flickr sync failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 28: foto_export_vault
+server.tool(
+  "foto_export_vault",
+  "Export a complete offline backup archive of your Foto portfolio: downloads high-resolution 1820px photos, technical EXIF metadata JSON sidecars, and a master manifest.json index.",
+  {
+    targetDirectory: z.string().describe("Local destination directory path where vault archive will be saved"),
+    limit: z.number().int().positive().optional().describe("Maximum number of posts to export (defaults to all)"),
+    dryRun: z.boolean().optional().describe("If true, previews what will be backed up without downloading images")
+  },
+  async ({ targetDirectory, limit, dryRun = false }) => {
+    try {
+      const exporter = new VaultExporter(client);
+      const result = await exporter.exportVault({ targetDirectory, limit, dryRun });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Vault export failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 29: foto_watch_directory
+server.tool(
+  "foto_watch_directory",
+  "Scan a local studio watch directory (e.g. Lightroom or Capture One export folder), auto-inspect new photo exports, extract camera EXIF, suggest curated tags, generate color-corrected preview thumbnails, and format publication drafts.",
+  {
+    directoryPath: z.string().describe("Path to local directory to scan for photography exports"),
+    includePreview: z.boolean().optional().describe("Whether to generate base64 multimodal preview thumbnails (default: true)"),
+    maxPhotos: z.number().int().positive().optional().describe("Maximum number of photos to scan (default: 50)")
+  },
+  async ({ directoryPath, includePreview = true, maxPhotos = 50 }) => {
+    try {
+      const watcher = new WatchFolderService(client);
+      const result = await watcher.scanWatchDirectory({ directoryPath, includePreview, maxPhotos });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Watch directory scan failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
 // MCP Resource: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",
@@ -991,9 +1077,42 @@ Guidelines:
 export { server, client };
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Foto MCP Server running on stdio transport.");
+  const args = process.argv.slice(2);
+  const isSse = (args.includes("--transport") && args[args.indexOf("--transport") + 1] === "sse")
+    || process.env.MCP_TRANSPORT === "sse";
+
+  if (isSse) {
+    const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
+    const http = await import("node:http");
+    const port = Number(process.env.PORT) || 3000;
+
+    let sseTransport: any = null;
+
+    const serverHttp = http.createServer(async (req, res) => {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      if (url.pathname === "/sse") {
+        sseTransport = new SSEServerTransport("/messages", res);
+        await server.connect(sseTransport);
+      } else if (url.pathname === "/messages" && req.method === "POST") {
+        if (sseTransport) {
+          await sseTransport.handlePostMessage(req, res);
+        } else {
+          res.writeHead(400).end("No active SSE transport connection");
+        }
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ name: "foto_mcp", version: "2.0.0", status: "running" }));
+      }
+    });
+
+    serverHttp.listen(port, () => {
+      console.error(`Foto MCP Server running on SSE transport at http://localhost:${port}/sse`);
+    });
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("Foto MCP Server running on stdio transport.");
+  }
 }
 
 if (process.env.NODE_ENV !== "test" && !process.env.FOTO_MCP_TEST) {

@@ -5,6 +5,21 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-09
+
+### Added
+- **Universal Migration & Archival Ecosystem (29 Total MCP Tools)**:
+  - `foto_sync_flickr`: Migrates photography archives from official Flickr JSON account exports. Automatically maps Flickr tags to Foto's 303 curated taxonomy, cleans narrative descriptions, associates local image files, scrubs GPS, deduplicates against published posts, and supports `dryRun=true`.
+  - `foto_export_vault`: Full archival vault backup downloader. Downloads published high-resolution photos, generates per-post camera EXIF sidecars (`<postId>.json`), and builds a master `manifest.json` archive index with tag breakdowns and engagement metrics.
+  - `foto_watch_directory`: Pro studio export monitor. Scans Lightroom, Capture One, and darktable output directories, extracts camera and lens EXIF metadata, generates sRGB base64 multimodal preview thumbnails, auto-suggests curated tags, and stages publication drafts.
+- **SSE / HTTP Remote MCP Transport**:
+  - Added Server-Sent Events (SSE) remote transport mode alongside default Stdio JSON-RPC.
+  - Configurable via `--transport sse --port <port>` CLI flags or `MCP_TRANSPORT=sse` and `MCP_PORT=<port>` environment variables.
+  - Enables hosting `foto_mcp` as a remote microservice or containerized agent endpoint.
+- **Node.js LTS Alignment**:
+  - Updated Node engine requirement to `">=20.9.0"` in alignment with Sharp 0.35+ and modern LTS runtimes (Node 20.x, 22.x, 24.x).
+  - Maintained 100% CI pass rate across all matrix environments.
+
 ## [1.5.0] - 2026-11-09
 
 ### Added

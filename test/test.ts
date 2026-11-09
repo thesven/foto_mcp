@@ -23,6 +23,9 @@ import { runProcessorTests } from "./unit/processor.test.js";
 import { runTagTests } from "./unit/tags.test.js";
 import { runFotoClientTests } from "./unit/foto-client.test.js";
 import { runInstagramTests } from "./unit/instagram.test.js";
+import { runFlickrTests } from "./unit/flickr.test.js";
+import { runVaultTests } from "./unit/vault.test.js";
+import { runWatcherTests } from "./unit/watcher.test.js";
 import { runMcpServerTests } from "./unit/mcp-server.test.js";
 
 async function runTests() {
@@ -234,6 +237,9 @@ async function runTests() {
   await runTagTests();
   await runFotoClientTests();
   await runInstagramTests();
+  await runFlickrTests();
+  await runVaultTests();
+  await runWatcherTests();
   await runMcpServerTests();
 
   console.log("\n=== All Tests Passed Successfully! ===");

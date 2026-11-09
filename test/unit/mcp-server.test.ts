@@ -425,6 +425,43 @@ export async function runMcpServerTests() {
     assert(!listPortRes.isError);
     assert(listPortRes.content[0].text.includes("MCP Portfolio"));
 
+    // 30. Tool: foto_sync_flickr (dryRun and error)
+    const flickrExportJson = path.join(tempDir, "mcp_flickr.json");
+    await fs.writeFile(flickrExportJson, JSON.stringify([{ id: "fl1", name: "Flickr photo", file: "test.jpg" }]));
+    const flickrSyncRes = await tools.foto_sync_flickr.handler({ exportPath: flickrExportJson, mediaDir: tempDir, dryRun: true }, {} as any);
+    assert(!flickrSyncRes.isError);
+    assert(flickrSyncRes.content[0].text.includes("totalParsed"));
+
+    const flickrFail = await tools.foto_sync_flickr.handler({ exportPath: "/no/file.json" }, {} as any);
+    assert.strictEqual(flickrFail.isError, true);
+
+    // 31. Tool: foto_export_vault (dryRun and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_browse")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_browse" }, postIds: { arrayValue: { values: [{ stringValue: "p_tool_v1" }] } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const vaultRes = await tools.foto_export_vault.handler({ targetDirectory: path.join(tempDir, "mcp_vault"), dryRun: true }, {} as any);
+    assert(!vaultRes.isError);
+    assert(vaultRes.content[0].text.includes("[DRY RUN]"));
+
+    const vaultFail = await tools.foto_export_vault.handler({ targetDirectory: "" }, {} as any);
+    assert.strictEqual(vaultFail.isError, true);
+
+    // 32. Tool: foto_watch_directory (success and error)
+    const watchFolder = path.join(tempDir, "mcp_watch");
+    await fs.mkdir(watchFolder, { recursive: true });
+    await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 10, g: 20, b: 30 } } }).jpeg().toFile(path.join(watchFolder, "shot1.jpg"));
+
+    const watchRes = await tools.foto_watch_directory.handler({ directoryPath: watchFolder, includePreview: true }, {} as any);
+    assert(!watchRes.isError);
+    assert(watchRes.content[0].text.includes("shot1.jpg"));
+
+    const watchFail = await tools.foto_watch_directory.handler({ directoryPath: "/no/dir/here" }, {} as any);
+    assert.strictEqual(watchFail.isError, true);
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });
