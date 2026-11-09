@@ -308,6 +308,57 @@ server.tool(
   }
 );
 
+import { InstagramSyncTool } from "./sync/instagram.js";
+
+// Tool 11: foto_sync_instagram
+server.tool(
+  "foto_sync_instagram",
+  "Synchronize posts from an Instagram data export (HTML/JSON) to Foto. Cleans hashtags, suggests 1-3 curated tags, normalizes dimensions, scrubs GPS, and checks against already-published Foto posts. Default dryRun=true validates everything without publishing.",
+  {
+    htmlFilePath: z.string().describe("File path to Instagram export HTML file (e.g. posts_1.html)"),
+    mediaDir: z.string().optional().describe("Directory containing extracted Instagram images"),
+    maxPosts: z.number().int().positive().optional().describe("Maximum posts to process in this run (default: 5)"),
+    dryRun: z.boolean().optional().describe("If true (default), performs complete dry-run validation without uploading")
+  },
+  async ({ htmlFilePath, mediaDir, maxPosts = 5, dryRun = true }) => {
+    try {
+      let existingFotoCaptions: string[] = [];
+      try {
+        const profile = await client.getUserProfile();
+        // Extract existing post IDs/descriptions if available
+        if (profile && profile.recentTags) {
+          existingFotoCaptions = profile.recentTags;
+        }
+      } catch {
+        // Continue if profile fetch fails
+      }
+
+      const syncTool = new InstagramSyncTool(client);
+      const report = await syncTool.runSync({
+        htmlFilePath,
+        mediaDir,
+        maxPosts,
+        dryRun,
+        existingFotoCaptions
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(report, null, 2)
+          }
+        ]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Instagram sync failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
