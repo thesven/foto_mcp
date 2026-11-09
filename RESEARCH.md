@@ -449,6 +449,21 @@ flowchart TD
 * **Input Parameters:** None (uses active authentication session).
 * **Output:** Profile summary object.
 
+#### Tool 8: `foto_browse_tag`
+* **Description:** Queries Foto's sharded tag index (`tag_index/<tag>_<shard>`) to browse recent public posts published under any curated tag.
+* **Input Parameters:**
+  * `tag` (string, required): Curated tag name (e.g. `Fine Art Nude`, `Boudoir`, `Street`).
+  * `limit` (number, optional): Maximum posts to return (default: 20).
+  * `shard` (number, optional): Target shard number (defaults to latest shard from metadata).
+* **Output:** Shard information, post count, and array of resolved post documents with author IDs and media URLs.
+
+#### Tool 9: `foto_find_photographers_by_tag`
+* **Description:** Discovers photographers publishing under a specific curated tag. Aggregates author IDs from tag shards, resolves user profile documents from `user-profiles`, extracts bio and stats, and gathers sample works.
+* **Input Parameters:**
+  * `tag` (string, required): Curated tag name (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`).
+  * `limit` (number, optional): Maximum photographers to return (default: 10).
+* **Output:** Photographer profile summaries, follower counts, bio, profile links, and recent sample posts under that tag.
+
 ### 6.3 Recommended Technology Stack
 
 We recommend implementing the MCP server in **TypeScript (Node.js)**:

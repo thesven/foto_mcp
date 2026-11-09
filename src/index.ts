@@ -11,7 +11,7 @@ const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "1.0.0"
+  version: "1.1.0"
 });
 
 // Tool 1: foto_auth_status
@@ -353,6 +353,63 @@ server.tool(
       return {
         isError: true,
         content: [{ type: "text", text: `Instagram sync failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 12: foto_browse_tag
+server.tool(
+  "foto_browse_tag",
+  "Browse recent public posts on Foto under a curated tag (e.g. 'Fine Art Nude', 'Boudoir', 'Street', 'Landscape', 'Analog').",
+  {
+    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Fine Art Nude', 'Boudoir', 'Street')"),
+    limit: z.number().int().positive().max(50).optional().describe("Maximum number of posts to return (default: 20)"),
+    shard: z.number().int().min(0).optional().describe("Specific tag index shard number (defaults to latest shard)")
+  },
+  async ({ tag, limit, shard }) => {
+    try {
+      const results = await client.browseTag({ tag, limit, shard });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(results, null, 2)
+          }
+        ]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to browse tag "${tag}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 13: foto_find_photographers_by_tag
+server.tool(
+  "foto_find_photographers_by_tag",
+  "Find photographers on Foto who publish under a specific curated tag (such as 'Fine Art Nude', 'Boudoir', 'Portrait', 'Street', etc.). Resolves user profiles, bios, stats, and profile URLs.",
+  {
+    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Fine Art Nude', 'Boudoir')"),
+    limit: z.number().int().positive().max(25).optional().describe("Maximum number of photographers to return (default: 10)")
+  },
+  async ({ tag, limit }) => {
+    try {
+      const results = await client.findPhotographersByTag({ tag, limit });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(results, null, 2)
+          }
+        ]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to find photographers for tag "${tag}": ${err.message}` }]
       };
     }
   }

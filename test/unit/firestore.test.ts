@@ -11,7 +11,11 @@ import {
   indexPostTags,
   fetchUserProfile,
   deleteFirestoreDocument,
-  resetUserProfilePosts
+  resetUserProfilePosts,
+  fetchTagIndexMeta,
+  fetchTagShardPosts,
+  fetchPostDocument,
+  fetchPostsDocuments
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -308,6 +312,65 @@ export async function runFirestoreTests() {
       idToken: "tok"
     });
     assert.strictEqual(resetOk, true);
+
+    // fetchTagIndexMeta
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("Fine Art Nude_meta")) {
+        return new Response(JSON.stringify({ fields: { currentShard: { integerValue: "1" }, postCount: { integerValue: "420" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const metaFound = await fetchTagIndexMeta({ tag: "Fine Art Nude", idToken: "tok" });
+    assert.strictEqual(metaFound?.currentShard, 1);
+    assert.strictEqual(metaFound?.postCount, 420);
+
+    const metaNotFound = await fetchTagIndexMeta({ tag: "Nonexistent", idToken: "tok" });
+    assert.strictEqual(metaNotFound, null);
+
+    // fetchTagShardPosts
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("Fine Art Nude_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "post_1" }, { stringValue: "post_2" }] } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const shardPosts = await fetchTagShardPosts({ tag: "Fine Art Nude", shard: 0, idToken: "tok" });
+    assert.deepStrictEqual(shardPosts, ["post_1", "post_2"]);
+
+    const shardPostsEmpty = await fetchTagShardPosts({ tag: "Empty", shard: 0, idToken: "tok" });
+    assert.deepStrictEqual(shardPostsEmpty, []);
+
+    // fetchPostDocument
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/post_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "post_1" }, description: { stringValue: "Artistic portrait" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const postDoc = await fetchPostDocument({ postId: "post_1", idToken: "tok" });
+    assert.strictEqual(postDoc?.description, "Artistic portrait");
+
+    const postDocMissing = await fetchPostDocument({ postId: "post_missing", idToken: "tok" });
+    assert.strictEqual(postDocMissing, null);
+
+    // fetchPostsDocuments
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/post_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "post_1" }, userId: { stringValue: "u1" } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/post_2")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "post_2" }, userId: { stringValue: "u2" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const batchPosts = await fetchPostsDocuments({ postIds: ["post_1", "post_2", "post_missing"], idToken: "tok" });
+    assert.strictEqual(batchPosts.length, 2);
+    assert.strictEqual(batchPosts[0].userId, "u1");
+    assert.strictEqual(batchPosts[1].userId, "u2");
 
   } finally {
     globalThis.fetch = originalFetch;

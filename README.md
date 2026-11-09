@@ -1,14 +1,14 @@
 # Foto MCP Server (`foto_mcp`)
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-97.8%25-brightgreen.svg)]()
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-orange.svg)]()
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
 
 An official Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
 
-This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, and publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed.
+This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed, and discover photographers across Foto's 303 curated tags.
 
 ---
 
@@ -19,10 +19,11 @@ flowchart TD
     Client["AI Assistant / MCP Client<br>(Claude Desktop, Cursor, Zed, Windsurf)"]
     
     subgraph Foto_MCP ["Foto MCP Server (foto_mcp)"]
-        Tools["11 Native MCP Tools<br>& Resources / Prompts"]
+        Tools["13 Native MCP Tools<br>& Resources / Prompts"]
         Proc["Sharp & Exifr Media Pipeline<br>• Max 1820px Zero-Crop<br>• Strips GPS & Thumbnails<br>• Extracts Camera & Lens EXIF"]
         Auth["Firebase REST Auth<br>• Local Token Cache (chmod 0600)<br>• Auto Token Refresh (60s buffer)"]
         Sync["Instagram Migration Engine<br>• Cleans Hashtags<br>• Maps Curated Tags<br>• Deduplicates Posts"]
+        Discovery["Discovery & Tag Query Engine<br>• Inverted Sharded Tag Index<br>• User Profile & Post Resolution"]
     end
     
     subgraph Foto_Cloud ["Foto Cloud Infrastructure (foto-d963e)"]
@@ -35,9 +36,11 @@ flowchart TD
     Tools --> Proc
     Tools --> Auth
     Tools --> Sync
+    Tools --> Discovery
     Proc --> Storage
     Storage --> Sightengine
     Sightengine --> Firestore
+    Discovery --> Firestore
 ```
 
 ---
@@ -48,6 +51,7 @@ flowchart TD
 * **Privacy by Design (GPS Scrubbing):** Automatically strips embedded GPS coordinates and thumbnail IFDs from binary files before upload to prevent wildlife and location tracking.
 * **Technical EXIF Preservation:** Parses camera body, lens model, ISO, aperture ($f$-number), shutter speed, and focal length into Foto's `image-private-metadata` system so technical details are preserved for photography enthusiasts.
 * **Curated 303 Tag Taxonomy:** Strictly enforces Foto's platform rule of **1 to 3 tags** selected exclusively from the official whitelist of **303 curated photographic tags**. Completely eliminates hashtag spam.
+* **Photographer & Content Discovery:** Query Foto's inverted sharded index (`tag_index`) to find recent posts and discover active photographers publishing under any curated genre (such as `Fine Art Nude`, `Boudoir`, `Street`, `Landscape`, or `Analog`).
 * **Smart AI Tag Suggester:** Analyzes narrative descriptions, gear notes, or film stocks (e.g. `Hasselblad 500C/M`, `Kodak Portra 400`, `Street`) and recommends the best matching tags.
 * **Multi-Image Series (Stories):** Authors and publishes sequential multi-photo stories (2 to 5 images per post).
 * **Automated Content Moderation:** Automatically validates uploads against platform community safety rules and Sightengine moderation (`sexual_activity <= 0.7`, `sexual_display <= 0.9`).
@@ -61,7 +65,7 @@ flowchart TD
 You can run `foto_mcp` directly without cloning or building locally:
 
 ```bash
-npx -y github:thesven/foto_mcp#v1.0.0
+npx -y github:thesven/foto_mcp#v1.1.0
 ```
 
 ---
@@ -79,7 +83,7 @@ Add this to your Claude Desktop configuration file:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"],
+      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"],
       "env": {
         "FOTO_EMAIL": "your_email@example.com",
         "FOTO_PASSWORD": "your_password"
@@ -96,7 +100,7 @@ Add to `.cursor/mcp.json` or your Global Cursor MCP settings:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
     }
   }
 }
@@ -110,7 +114,7 @@ Add to `~/.config/zed/settings.json`:
     "servers": {
       "foto": {
         "command": "npx",
-        "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
+        "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
       }
     }
   }
@@ -124,7 +128,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.1.0"]
     }
   }
 }
@@ -154,7 +158,7 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (11 Tools)
+## Complete MCP Tool Suite (13 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
@@ -164,6 +168,8 @@ export FOTO_PASSWORD="your_password"
 | `foto_inspect_image` | Inspects local image: returns dimensions, photographic aspect ratio (e.g. 3:2, 6:7), GPS status, and camera/lens EXIF. | `filePath` (string) |
 | `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, or keywords. | `caption?` (string), `cameraInfo?` (string), `keywords?` (string[]) |
 | `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query` (string), `limit?` (number, default: 20) |
+| `foto_browse_tag` | Browse recent public posts under any of Foto's 303 curated tags with shard and pagination support. | `tag` (string), `limit?` (number, default: 20), `shard?` (number) |
+| `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`, `Street`). Returns bios, stats, profile links, and sample works. | `tag` (string), `limit?` (number, default: 10) |
 | `foto_draft_post` | Validates a post draft before publishing: checks tag whitelist, calculates downsampled dimensions, and reviews EXIF summary. | `filePath` (string), `caption` (string), `tags` (string[]) |
 | `foto_publish_post` | Normalizes image (1820px), scrubs GPS, uploads to Storage, passes Sightengine moderation, and creates public Firestore post. | `filePath` (string), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
 | `foto_publish_series` | Publishes a multi-image sequential Series (2 to 5 photos) under one post. | `filePaths` (string[], min: 2, max: 5), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
@@ -257,6 +263,36 @@ Claude runs `foto_sync_instagram`:
 }
 ```
 
+### 6. Finding Photographers Posting Under "Fine Art Nude"
+> *"Find photographers on Foto who post nudes."*
+
+Claude queries Foto's taxonomy with `foto_search_tags`, identifies canonical tags `Fine Art Nude` and `Boudoir`, and runs `foto_find_photographers_by_tag`:
+```json
+{
+  "tag": "Fine Art Nude",
+  "photographerCount": 2,
+  "photographers": [
+    {
+      "userId": "Q7rrA5L9okTVO4g36bsTZUEZ2Cu2",
+      "username": "elena_fineart",
+      "displayName": "Elena Rostova",
+      "bio": "Shadows, form, and medium format film portraiture.",
+      "postCount": 42,
+      "followerCount": 1850,
+      "profileUrl": "https://the.fotoapp.co/app/profile?userId=Q7rrA5L9okTVO4g36bsTZUEZ2Cu2",
+      "samplePostsUnderTag": [
+        {
+          "postId": "20261109155500-Q7rrA5L9okTVO4g36bsTZUEZ2Cu2-aB3k9XyZ",
+          "imageUrl": "https://firebasestorage.googleapis.com/v0/b/foto-d963e.appspot.com/o/...",
+          "description": "Form study in low key tungsten lighting.",
+          "tags": ["Fine Art Nude", "Medium Format", "Studio"]
+        }
+      ]
+    }
+  ]
+}
+```
+
 ---
 
 ## Build from Source & Developer Guide
@@ -288,14 +324,14 @@ Current test coverage breakdown:
 -----------------|---------|----------|---------|---------|
 File             | % Stmts | % Branch | % Funcs | % Lines |
 -----------------|---------|----------|---------|---------|
-All files        |   97.71 |    84.55 |   96.07 |   97.71 |
+All files        |   97.82 |    82.58 |   96.61 |   97.82 |
  src/config.ts   |     100 |      100 |     100 |     100 |
- src/foto-client |     100 |     92.3 |     100 |     100 |
+ src/foto-client |   99.33 |    78.31 |     100 |   99.33 |
  src/tags.ts     |     100 |      100 |     100 |     100 |
- src/api/*       |   98.24 |    86.62 |     100 |   98.24 |
+ src/api/*       |   98.07 |    86.44 |     100 |   98.07 |
  src/media/*     |   94.88 |    63.93 |      80 |   94.88 |
- src/sync/*      |   98.71 |    86.56 |     100 |   98.71 |
- src/index.ts    |   92.94 |    80.64 |      50 |   92.94 |
+ src/sync/*      |   98.81 |    84.05 |     100 |   98.81 |
+ src/index.ts    |   93.77 |    82.85 |      50 |   93.77 |
 -----------------|---------|----------|---------|---------|
 ```
 

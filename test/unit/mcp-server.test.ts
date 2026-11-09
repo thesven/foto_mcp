@@ -146,6 +146,52 @@ export async function runMcpServerTests() {
     const igFail = await tools.foto_sync_instagram.handler({ htmlFilePath: "/no/ig.html" }, {} as any);
     assert.strictEqual(igFail.isError, true);
 
+    // 14. Tool: foto_browse_tag (success and error)
+    await saveCredentials({ userId: "u_browse", idToken: "tok", refreshToken: "ref", expiresAt: Date.now() + 3600000 });
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("Boudoir_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "b1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/b1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "b1" }, userId: { stringValue: "u_boudoir" }, tags: { arrayValue: { values: [{ stringValue: "Boudoir" }] } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const browseRes = await tools.foto_browse_tag.handler({ tag: "Boudoir", limit: 5 }, {} as any);
+    assert(!browseRes.isError);
+    assert(browseRes.content[0].text.includes("Boudoir"));
+    assert(browseRes.content[0].text.includes("b1"));
+
+    const browseFail = await tools.foto_browse_tag.handler({ tag: "InvalidNotRealTag" }, {} as any);
+    assert.strictEqual(browseFail.isError, true);
+    assert(browseFail.content[0].text.includes("Failed to browse tag"));
+
+    // 15. Tool: foto_find_photographers_by_tag (success and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("Boudoir_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "b1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/b1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "b1" }, userId: { stringValue: "u_boudoir" }, tags: { arrayValue: { values: [{ stringValue: "Boudoir" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_boudoir")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "boudoir_studio" }, displayName: { stringValue: "Intimate Light Studio" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const findPhotogRes = await tools.foto_find_photographers_by_tag.handler({ tag: "Boudoir" }, {} as any);
+    assert(!findPhotogRes.isError);
+    assert(findPhotogRes.content[0].text.includes("boudoir_studio"));
+    assert(findPhotogRes.content[0].text.includes("Intimate Light Studio"));
+
+    const findPhotogFail = await tools.foto_find_photographers_by_tag.handler({ tag: "NotAValidTag" }, {} as any);
+    assert.strictEqual(findPhotogFail.isError, true);
+    assert(findPhotogFail.content[0].text.includes("Failed to find photographers"));
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });

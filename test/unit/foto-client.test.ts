@@ -195,6 +195,105 @@ export async function runFotoClientTests() {
     assert.strictEqual(prof.username, "photo_artist");
     assert.strictEqual(prof.bio, "Visual storyteller");
 
+    // 12. browseTag - invalid tag
+    await assert.rejects(
+      async () => {
+        await client.browseTag({ tag: "InvalidNonCuratedTag" });
+      },
+      /is not a valid Foto curated tag/
+    );
+
+    // 13. browseTag - valid tag with posts
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("Fine Art Nude_meta")) {
+        return new Response(JSON.stringify({ fields: { currentShard: { integerValue: "0" }, postCount: { integerValue: "2" } } }), { status: 200 });
+      }
+      if (urlStr.includes("Fine Art Nude_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "p_nude_1" }, { stringValue: "p_nude_2" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_nude_1")) {
+        return new Response(JSON.stringify({
+          fields: {
+            postId: { stringValue: "p_nude_1" },
+            userId: { stringValue: "artist_1" },
+            description: { stringValue: "Shadow and human form" },
+            tags: { arrayValue: { values: [{ stringValue: "Fine Art Nude" }] } },
+            imageUrl: { stringValue: "https://foto.storage/p1.jpg" },
+            nudityRating: { doubleValue: 0.15 }
+          }
+        }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_nude_2")) {
+        return new Response(JSON.stringify({
+          fields: {
+            postId: { stringValue: "p_nude_2" },
+            userId: { stringValue: "artist_2" },
+            description: { stringValue: "Abstract figure" },
+            tags: { arrayValue: { values: [{ stringValue: "Fine Art Nude" }] } },
+            imageUrl: { stringValue: "https://foto.storage/p2.jpg" },
+            nudityRating: { doubleValue: 0.22 }
+          }
+        }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const browseResult = await client.browseTag({ tag: "Fine Art Nude" });
+    assert.strictEqual(browseResult.tag, "Fine Art Nude");
+    assert.strictEqual(browseResult.shard, 0);
+    assert.strictEqual(browseResult.totalPostsInShard, 2);
+    assert.strictEqual(browseResult.returnedCount, 2);
+    assert.strictEqual(browseResult.posts[0].postId, "p_nude_2"); // newest first
+
+    // Test with explicit shard
+    const browseShardResult = await client.browseTag({ tag: "Fine Art Nude", shard: 0, limit: 1 });
+    assert.strictEqual(browseShardResult.returnedCount, 1);
+
+    // 14. findPhotographersByTag - invalid tag
+    await assert.rejects(
+      async () => {
+        await client.findPhotographersByTag({ tag: "BadTag" });
+      },
+      /is not a valid Foto curated tag/
+    );
+
+    // 15. findPhotographersByTag - valid tag
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("Fine Art Nude_meta")) {
+        return new Response(JSON.stringify({ fields: { currentShard: { integerValue: "0" } } }), { status: 200 });
+      }
+      if (urlStr.includes("Fine Art Nude_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "p_nude_1" }, { stringValue: "p_nude_2" }, { stringValue: "p_nude_3" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_nude_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_nude_1" }, userId: { stringValue: "artist_1" }, description: { stringValue: "Shot 1" }, tags: { arrayValue: { values: [{ stringValue: "Fine Art Nude" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_nude_2")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_nude_2" }, userId: { stringValue: "artist_2" }, description: { stringValue: "Shot 2" }, tags: { arrayValue: { values: [{ stringValue: "Fine Art Nude" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_nude_3")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_nude_3" }, userId: { stringValue: "artist_1" }, description: { stringValue: "Shot 3" }, tags: { arrayValue: { values: [{ stringValue: "Fine Art Nude" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/artist_1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "elena_fineart" }, displayName: { stringValue: "Elena Rostova" }, bio: { stringValue: "Fine art nudes and figures" }, postCount: { integerValue: "42" }, followerCount: { integerValue: "1850" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/artist_2")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "marcus_lens" }, displayName: { stringValue: "Marcus Vance" }, postCount: { integerValue: "15" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const photogs = await client.findPhotographersByTag({ tag: "Fine Art Nude" });
+    assert.strictEqual(photogs.tag, "Fine Art Nude");
+    assert.strictEqual(photogs.photographerCount, 2);
+    assert.strictEqual(photogs.photographers[0].username, "elena_fineart");
+    assert.strictEqual(photogs.photographers[0].displayName, "Elena Rostova");
+    assert.strictEqual(photogs.photographers[0].bio, "Fine art nudes and figures");
+    assert.strictEqual(photogs.photographers[0].samplePostsUnderTag.length, 2);
+    assert.strictEqual(photogs.photographers[1].username, "marcus_lens");
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

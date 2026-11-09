@@ -537,3 +537,78 @@ export async function resetUserProfilePosts(params: {
   return res.ok;
 }
 
+/**
+ * Fetches metadata for a curated tag index (e.g. tag_index/<tag>_meta)
+ */
+export async function fetchTagIndexMeta(params: {
+  tag: string;
+  idToken: string;
+}): Promise<{ currentShard: number; postCount: number } | null> {
+  const meta = await getFirestoreDocument({
+    collectionPath: "tag_index",
+    documentId: `${params.tag}_meta`,
+    idToken: params.idToken
+  });
+
+  if (!meta) return null;
+
+  return {
+    currentShard: typeof meta.currentShard === "number" ? meta.currentShard : 0,
+    postCount: typeof meta.postCount === "number" ? meta.postCount : 0
+  };
+}
+
+/**
+ * Fetches post IDs recorded under a specific tag shard (e.g. tag_index/<tag>_<shard>)
+ */
+export async function fetchTagShardPosts(params: {
+  tag: string;
+  shard?: number;
+  idToken: string;
+}): Promise<string[]> {
+  const shard = params.shard ?? 0;
+  const shardDoc = await getFirestoreDocument({
+    collectionPath: "tag_index",
+    documentId: `${params.tag}_${shard}`,
+    idToken: params.idToken
+  });
+
+  if (!shardDoc || !Array.isArray(shardDoc.posts)) {
+    return [];
+  }
+
+  return shardDoc.posts.filter((p: any): p is string => typeof p === "string");
+}
+
+/**
+ * Fetches a single post document by post ID
+ */
+export async function fetchPostDocument(params: {
+  postId: string;
+  idToken: string;
+}): Promise<Record<string, any> | null> {
+  return await getFirestoreDocument({
+    collectionPath: "posts",
+    documentId: params.postId,
+    idToken: params.idToken
+  });
+}
+
+/**
+ * Fetches multiple post documents in parallel by their post IDs
+ */
+export async function fetchPostsDocuments(params: {
+  postIds: string[];
+  idToken: string;
+}): Promise<Array<Record<string, any>>> {
+  const fetchPromises = params.postIds.map(async (postId) => {
+    try {
+      return await fetchPostDocument({ postId, idToken: params.idToken });
+    } catch {
+      return null;
+    }
+  });
+
+  const results = await Promise.all(fetchPromises);
+  return results.filter((doc): doc is Record<string, any> => doc !== null && typeof doc === "object");
+}

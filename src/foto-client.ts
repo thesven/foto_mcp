@@ -10,9 +10,67 @@ import {
   savePostDocument,
   appendPostToUserProfile,
   indexPostTags,
-  fetchUserProfile
+  fetchUserProfile,
+  fetchTagIndexMeta,
+  fetchTagShardPosts,
+  fetchPostDocument,
+  fetchPostsDocuments
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
+
+export interface BrowseTagParams {
+  tag: string;
+  limit?: number;
+  shard?: number;
+}
+
+export interface BrowseTagResult {
+  tag: string;
+  shard: number;
+  totalPostsInShard: number;
+  returnedCount: number;
+  posts: Array<{
+    postId: string;
+    userId: string;
+    description?: string;
+    tags: string[];
+    imageUrl?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    nudityRating?: number;
+    timeStamp?: any;
+    postUrl: string;
+  }>;
+}
+
+export interface FindPhotographersParams {
+  tag: string;
+  limit?: number;
+  shard?: number;
+}
+
+export interface FindPhotographersResult {
+  tag: string;
+  photographerCount: number;
+  photographers: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    bio: string | null;
+    profilePhotoUrl: string | null;
+    postCount: number;
+    followerCount: number;
+    profileUrl: string;
+    samplePostsUnderTag: Array<{
+      postId: string;
+      imageUrl?: string;
+      description?: string;
+      tags: string[];
+      nudityRating?: number;
+      timeStamp?: any;
+    }>;
+  }>;
+}
 
 export interface PublishPostParams {
   filePath: string;
@@ -389,4 +447,154 @@ export class FotoClient {
       ...(profile || {})
     };
   }
+
+  /**
+   * Browse recent posts under a specific curated tag
+   */
+  async browseTag(params: BrowseTagParams): Promise<BrowseTagResult> {
+    const validation = validateTags([params.tag]);
+    if (!validation.valid || validation.canonicalTags.length === 0) {
+      throw new Error(`Tag "${params.tag}" is not a valid Foto curated tag. Use foto_search_tags to find valid tags.`);
+    }
+    const canonicalTag = validation.canonicalTags[0];
+    const authSession = await getValidAuthSession();
+
+    let shard = params.shard;
+    if (shard === undefined) {
+      const meta = await fetchTagIndexMeta({ tag: canonicalTag, idToken: authSession.idToken });
+      shard = meta?.currentShard ?? 0;
+    }
+
+    const postIds = await fetchTagShardPosts({
+      tag: canonicalTag,
+      shard,
+      idToken: authSession.idToken
+    });
+
+    const limit = Math.min(params.limit || 20, 50);
+    const targetPostIds = [...postIds].reverse().slice(0, limit);
+    const postDocs = await fetchPostsDocuments({
+      postIds: targetPostIds,
+      idToken: authSession.idToken
+    });
+
+    const posts = postDocs.map((doc) => ({
+      postId: doc.postId || "",
+      userId: doc.userId || "",
+      description: doc.description || "",
+      tags: Array.isArray(doc.tags) ? doc.tags : [],
+      imageUrl: doc.imageUrl || (Array.isArray(doc.images) && doc.images[0]?.imageUrl) || "",
+      imageWidth: doc.imageWidth,
+      imageHeight: doc.imageHeight,
+      nudityRating: typeof doc.nudityRating === "number" ? doc.nudityRating : undefined,
+      timeStamp: doc.timeStamp,
+      postUrl: `https://the.fotoapp.co/app/profile?userId=${doc.userId}`
+    }));
+
+    return {
+      tag: canonicalTag,
+      shard,
+      totalPostsInShard: postIds.length,
+      returnedCount: posts.length,
+      posts
+    };
+  }
+
+  /**
+   * Find photographers who publish under a specific curated tag
+   */
+  async findPhotographersByTag(params: FindPhotographersParams): Promise<FindPhotographersResult> {
+    const validation = validateTags([params.tag]);
+    if (!validation.valid || validation.canonicalTags.length === 0) {
+      throw new Error(`Tag "${params.tag}" is not a valid Foto curated tag. Use foto_search_tags to find valid tags.`);
+    }
+    const canonicalTag = validation.canonicalTags[0];
+    const authSession = await getValidAuthSession();
+
+    let shard = params.shard;
+    if (shard === undefined) {
+      const meta = await fetchTagIndexMeta({ tag: canonicalTag, idToken: authSession.idToken });
+      shard = meta?.currentShard ?? 0;
+    }
+
+    const postIds = await fetchTagShardPosts({
+      tag: canonicalTag,
+      shard,
+      idToken: authSession.idToken
+    });
+
+    // Inspect recent posts to discover active photographers
+    const recentPostIds = [...postIds].reverse().slice(0, 100);
+    const postDocs = await fetchPostsDocuments({
+      postIds: recentPostIds,
+      idToken: authSession.idToken
+    });
+
+    // Group posts by author
+    const postsByUser = new Map<string, Array<Record<string, any>>>();
+    for (const doc of postDocs) {
+      if (!doc.userId) continue;
+      if (!postsByUser.has(doc.userId)) {
+        postsByUser.set(doc.userId, []);
+      }
+      postsByUser.get(doc.userId)!.push(doc);
+    }
+
+    const limit = Math.min(params.limit || 10, 25);
+    const userIds = Array.from(postsByUser.keys()).slice(0, limit);
+
+    // Fetch user profiles for each photographer
+    const photographers = await Promise.all(
+      userIds.map(async (userId) => {
+        let profile: Record<string, any> | null = null;
+        try {
+          profile = await fetchUserProfile({ userId, idToken: authSession.idToken });
+        } catch {
+          // Gracefully continue if single profile fetch errors
+        }
+
+        const userPosts = postsByUser.get(userId) || [];
+        const username = profile?.username || `user_${userId.substring(0, 8)}`;
+        const displayName = profile?.displayName || profile?.name || username;
+        const postCount =
+          typeof profile?.postCount === "number"
+            ? profile.postCount
+            : Array.isArray(profile?.postIds)
+            ? profile.postIds.length
+            : userPosts.length;
+        const followerCount =
+          typeof profile?.followerCount === "number"
+            ? profile.followerCount
+            : Array.isArray(profile?.followers)
+            ? profile.followers.length
+            : 0;
+
+        return {
+          userId,
+          username,
+          displayName,
+          bio: profile?.bio || null,
+          profilePhotoUrl: profile?.profilePhotoUrl || profile?.avatarUrl || null,
+          postCount,
+          followerCount,
+          profileUrl: `https://the.fotoapp.co/app/profile?userId=${userId}`,
+          samplePostsUnderTag: userPosts.slice(0, 3).map((p) => ({
+            postId: p.postId || "",
+            imageUrl: p.imageUrl || (Array.isArray(p.images) && p.images[0]?.imageUrl) || "",
+            description: p.description || "",
+            tags: Array.isArray(p.tags) ? p.tags : [],
+            nudityRating: typeof p.nudityRating === "number" ? p.nudityRating : undefined,
+            timeStamp: p.timeStamp
+          }))
+        };
+      })
+    );
+
+    return {
+      tag: canonicalTag,
+      photographerCount: photographers.length,
+      photographers
+    };
+  }
 }
+
