@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { FotoClient } from "./foto-client.js";
@@ -11,7 +11,7 @@ const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "1.1.0"
+  version: "1.3.0"
 });
 
 // Tool 1: foto_auth_status
@@ -450,6 +450,132 @@ server.tool(
   }
 );
 
+// Tool 15: foto_unfollow_user
+server.tool(
+  "foto_unfollow_user",
+  "Unfollow one or more photographers on Foto by user ID(s).",
+  {
+    userId: z.string().optional().describe("A single photographer userId to unfollow"),
+    userIds: z.array(z.string()).optional().describe("An array of photographer userIds to unfollow in batch")
+  },
+  async ({ userId, userIds }) => {
+    try {
+      if (userId) {
+        const result = await client.unfollowUser(userId);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      }
+      if (userIds && userIds.length > 0) {
+        const result = await client.unfollowUsers(userIds);
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+        };
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: "Please provide either userId or userIds to unfollow." }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to unfollow user(s): ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 16: foto_delete_post
+server.tool(
+  "foto_delete_post",
+  "Delete a published post on Foto by post ID. Automatically removes the post document, scrubs private metadata, and updates your user profile.",
+  {
+    postId: z.string().describe("The post ID of the post to delete")
+  },
+  async ({ postId }) => {
+    try {
+      const result = await client.deletePost(postId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to delete post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 17: foto_update_post
+server.tool(
+  "foto_update_post",
+  "Update the caption or tags of an existing Foto post. Tags must be 1 to 3 items selected from the official 303 curated list.",
+  {
+    postId: z.string().describe("The post ID of the post to update"),
+    caption: z.string().optional().describe("New caption or narrative text"),
+    tags: z.array(z.string()).optional().describe("New tags list (1 to 3 curated tags)")
+  },
+  async ({ postId, caption, tags }) => {
+    try {
+      const result = await client.updatePost({ postId, caption, tags });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to update post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 18: foto_get_post
+server.tool(
+  "foto_get_post",
+  "Retrieve complete details for a single Foto post by post ID, including high-res image URL, technical camera EXIF, and engagement stats.",
+  {
+    postId: z.string().describe("The post ID to look up")
+  },
+  async ({ postId }) => {
+    try {
+      const result = await client.getPost(postId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to retrieve post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 19: foto_get_photographer_profile
+server.tool(
+  "foto_get_photographer_profile",
+  "Look up any photographer's public profile on Foto by user ID or username. Returns bio, follower counts, profile link, and sample works.",
+  {
+    userId: z.string().optional().describe("The photographer user ID"),
+    username: z.string().optional().describe("The photographer username / handle (with or without @)")
+  },
+  async ({ userId, username }) => {
+    try {
+      const result = await client.getPhotographerProfile({ userId, username });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to retrieve photographer profile: ${err.message}` }]
+      };
+    }
+  }
+);
+
 // MCP Resource: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",
@@ -466,6 +592,52 @@ server.registerResource(
           uri: "foto://curated-tags",
           mimeType: "application/json",
           text: JSON.stringify(FOTO_ALLOWED_TAGS, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Dynamic Resource Template: Post Details
+server.resource(
+  "foto-post-detail",
+  new ResourceTemplate("foto://posts/{postId}", { list: undefined }),
+  {
+    title: "Foto Post Detail",
+    description: "Live post document and camera EXIF metadata on Foto",
+    mimeType: "application/json"
+  },
+  async (uri, { postId }) => {
+    const post = await client.getPost(String(postId));
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(post, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Dynamic Resource Template: Photographer Profile
+server.resource(
+  "foto-user-profile",
+  new ResourceTemplate("foto://users/{userId}", { list: undefined }),
+  {
+    title: "Foto Photographer Profile",
+    description: "Public creator profile, bio, and recent posts on Foto",
+    mimeType: "application/json"
+  },
+  async (uri, { userId }) => {
+    const profile = await client.getPhotographerProfile({ userId: String(userId) });
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(profile, null, 2)
         }
       ]
     };

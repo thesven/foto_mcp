@@ -719,3 +719,177 @@ export async function unfollowUserInFirestore(params: {
 
   return res.ok;
 }
+
+/**
+ * Deletes a post document, cleans up associated private metadata, and removes postId from user profile.
+ */
+export async function deletePostFromFirestore(params: {
+  postId: string;
+  userId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const { postId, userId, idToken } = params;
+
+  // 1. Fetch post doc to find associated privateMetadataId
+  const postDoc = await getFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    idToken
+  });
+
+  const privateMetadataId = postDoc?.privateMetadataId;
+
+  // 2. Delete posts/{postId}
+  await deleteFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    idToken
+  });
+
+  // 3. Delete image-private-metadata if present
+  if (privateMetadataId) {
+    try {
+      await deleteFirestoreDocument({
+        collectionPath: "image-private-metadata",
+        documentId: privateMetadataId,
+        idToken
+      });
+    } catch {
+      // Best-effort cleanup
+    }
+  }
+
+  // 4. Remove postId from user profile
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const userDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${userId}`;
+
+  try {
+    await fetch(commitUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        writes: [
+          {
+            transform: {
+              document: userDocPath,
+              fieldTransforms: [
+                {
+                  fieldPath: "postIds",
+                  removeAllFromArray: {
+                    values: [{ stringValue: postId }]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      })
+    });
+  } catch {
+    // Non-fatal if profile update fails
+  }
+
+  return true;
+}
+
+/**
+ * Updates description and/or tags on an existing post document.
+ */
+export async function updatePostInFirestore(params: {
+  postId: string;
+  userId: string;
+  description?: string;
+  tags?: string[];
+  idToken: string;
+}): Promise<Record<string, any>> {
+  const { postId, userId, description, tags, idToken } = params;
+
+  const current = await getFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    idToken
+  });
+
+  if (!current) {
+    throw new Error(`Post "${postId}" not found.`);
+  }
+
+  if (current.userId && current.userId !== userId) {
+    throw new Error(`Permission denied: You can only edit your own posts.`);
+  }
+
+  const updatedData: Record<string, any> = { ...current };
+  if (description !== undefined) {
+    updatedData.description = description;
+  }
+  if (tags !== undefined) {
+    updatedData.tags = tags;
+  }
+
+  await setFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    data: updatedData,
+    idToken
+  });
+
+  if (tags && tags.length > 0) {
+    await indexPostTags({ postId, tags, idToken });
+  }
+
+  return updatedData;
+}
+
+/**
+ * Fetches a post document combined with camera EXIF from image-private-metadata.
+ */
+export async function fetchPostWithMetadata(params: {
+  postId: string;
+  idToken: string;
+}): Promise<Record<string, any> | null> {
+  const post = await fetchPostDocument({ postId: params.postId, idToken: params.idToken });
+  if (!post) return null;
+
+  let exif: Record<string, any> | null = null;
+  if (post.privateMetadataId) {
+    try {
+      const meta = await getFirestoreDocument({
+        collectionPath: "image-private-metadata",
+        documentId: post.privateMetadataId,
+        idToken: params.idToken
+      });
+      if (meta?.exif) {
+        exif = meta.exif;
+      }
+    } catch {
+      // Continue if metadata doc unavailable
+    }
+  }
+
+  return {
+    ...post,
+    exif,
+    postUrl: `https://the.fotoapp.co/app/profile?userId=${post.userId}`
+  };
+}
+
+/**
+ * Resolves a username to its associated userId via the usernames collection registry.
+ */
+export async function resolveUserByUsername(params: {
+  username: string;
+  idToken: string;
+}): Promise<string | null> {
+  const cleanUsername = params.username.trim().replace(/^@/, "").toLowerCase();
+  const doc = await getFirestoreDocument({
+    collectionPath: "usernames",
+    documentId: cleanUsername,
+    idToken: params.idToken
+  });
+
+  if (!doc) return null;
+  return doc.userId || doc.uid || (typeof doc === "string" ? doc : null);
+}

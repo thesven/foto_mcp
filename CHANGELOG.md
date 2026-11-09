@@ -5,6 +5,24 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-09
+
+### Added
+- **Content Lifecycle & Profile Discovery Suite (19 Total MCP Tools)**:
+  - `foto_unfollow_user`: Unfollow photographers by single `userId` or bulk `userIds` via atomic `removeAllFromArray` Firestore transforms.
+  - `foto_delete_post`: Delete published posts by `postId`, automatically cleaning up post documents, removing IDs from user profile `postIds`, and removing private metadata.
+  - `foto_update_post`: Update captions and curated tags on existing posts with automatic 303-tag whitelist validation and tag index updating.
+  - `foto_get_post`: Retrieve full details of any post including high-res image URL, technical EXIF metadata, and engagement stats.
+  - `foto_get_photographer_profile`: Look up any photographer's public profile and recent posts by `userId` or `@username` handle.
+- **Dynamic MCP Resource Templates**:
+  - `foto://posts/{postId}`: Live JSON post document with EXIF camera gear metadata.
+  - `foto://users/{userId}`: Creator profile, bio, follower count, and recent works.
+- **Client & Firestore Engine Additions**:
+  - Added `deletePostFromFirestore`, `updatePostInFirestore`, `fetchPostWithMetadata`, and `resolveUserByUsername`.
+  - Added `deletePost`, `updatePost`, `getPost`, `getPhotographerProfile`, and `unfollowUsers` to `FotoClient`.
+- **Test Coverage**:
+  - Comprehensive unit test suites for all 5 new tools and 2 resource templates, maintaining >97% test coverage.
+
 ## [1.2.0] - 2026-11-09
 
 ### Added

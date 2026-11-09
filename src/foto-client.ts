@@ -16,7 +16,11 @@ import {
   fetchPostDocument,
   fetchPostsDocuments,
   followUserInFirestore,
-  unfollowUserInFirestore
+  unfollowUserInFirestore,
+  deletePostFromFirestore,
+  updatePostInFirestore,
+  fetchPostWithMetadata,
+  resolveUserByUsername
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
 
@@ -676,6 +680,183 @@ export class FotoClient {
       success,
       targetUserId,
       message: success ? `Successfully unfollowed user ${targetUserId}` : `Failed to unfollow user ${targetUserId}`
+    };
+  }
+
+  /**
+   * Unfollows multiple photographers on Foto by user IDs in batch
+   */
+  async unfollowUsers(targetUserIds: string[]): Promise<{
+    requestedCount: number;
+    unfollowedCount: number;
+    results: Array<{ userId: string; success: boolean }>;
+  }> {
+    const authSession = await getValidAuthSession();
+    const uniqueUids = Array.from(new Set(targetUserIds.filter(id => id && id !== authSession.userId)));
+
+    const results: Array<{ userId: string; success: boolean }> = [];
+    for (const targetUserId of uniqueUids) {
+      try {
+        const ok = await unfollowUserInFirestore({
+          currentUserId: authSession.userId,
+          targetUserId,
+          idToken: authSession.idToken
+        });
+        results.push({ userId: targetUserId, success: ok });
+      } catch {
+        results.push({ userId: targetUserId, success: false });
+      }
+    }
+
+    const unfollowedCount = results.filter(r => r.success).length;
+    return {
+      requestedCount: targetUserIds.length,
+      unfollowedCount,
+      results
+    };
+  }
+
+  /**
+   * Deletes a published post by post ID
+   */
+  async deletePost(postId: string): Promise<{ success: boolean; postId: string; message: string }> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await deletePostFromFirestore({
+      postId,
+      userId: authSession.userId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      postId,
+      message: success ? `Successfully deleted post "${postId}".` : `Failed to delete post "${postId}".`
+    };
+  }
+
+  /**
+   * Updates an existing post's caption and/or tags
+   */
+  async updatePost(params: {
+    postId: string;
+    caption?: string;
+    tags?: string[];
+  }): Promise<{ success: boolean; postId: string; post: Record<string, any>; message: string }> {
+    const { postId, caption, tags } = params;
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+
+    let validatedTags: string[] | undefined;
+    if (tags !== undefined) {
+      const validation = validateTags(tags);
+      if (!validation.valid) {
+        throw new Error(`Tag validation failed: ${validation.error}`);
+      }
+      validatedTags = validation.canonicalTags;
+    }
+
+    const authSession = await getValidAuthSession();
+    const updatedDoc = await updatePostInFirestore({
+      postId,
+      userId: authSession.userId,
+      description: caption,
+      tags: validatedTags,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      postId,
+      post: updatedDoc,
+      message: `Successfully updated post "${postId}".`
+    };
+  }
+
+  /**
+   * Fetches complete details for a single post by postId, including camera EXIF metadata
+   */
+  async getPost(postId: string): Promise<Record<string, any>> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const postWithMeta = await fetchPostWithMetadata({
+      postId,
+      idToken: authSession.idToken
+    });
+
+    if (!postWithMeta) {
+      throw new Error(`Post "${postId}" not found.`);
+    }
+
+    return postWithMeta;
+  }
+
+  /**
+   * Fetches any creator's public profile and recent posts by userId or username
+   */
+  async getPhotographerProfile(params: {
+    userId?: string;
+    username?: string;
+  }): Promise<Record<string, any>> {
+    const authSession = await getValidAuthSession();
+    let targetUserId = params.userId;
+
+    if (!targetUserId && params.username) {
+      targetUserId = (await resolveUserByUsername({
+        username: params.username,
+        idToken: authSession.idToken
+      })) || undefined;
+
+      if (!targetUserId) {
+        throw new Error(`User with username "@${params.username.replace(/^@/, "")}" not found.`);
+      }
+    }
+
+    if (!targetUserId) {
+      throw new Error("Please provide either userId or username.");
+    }
+
+    const profile = await fetchUserProfile({
+      userId: targetUserId,
+      idToken: authSession.idToken
+    });
+
+    if (!profile) {
+      throw new Error(`Photographer profile for userId "${targetUserId}" not found.`);
+    }
+
+    // Resolve recent posts if available
+    let recentPosts: Array<Record<string, any>> = [];
+    if (Array.isArray(profile.postIds) && profile.postIds.length > 0) {
+      const recentIds = profile.postIds.slice(-5).reverse();
+      recentPosts = await fetchPostsDocuments({
+        postIds: recentIds,
+        idToken: authSession.idToken
+      });
+    }
+
+    return {
+      userId: targetUserId,
+      username: profile.username || `user_${targetUserId.substring(0, 8)}`,
+      displayName: profile.displayName || profile.name || profile.username,
+      bio: profile.bio || null,
+      profilePhotoUrl: profile.profilePhotoUrl || profile.avatarUrl || null,
+      postCount: Array.isArray(profile.postIds) ? profile.postIds.length : (profile.postCount || 0),
+      followerCount: Array.isArray(profile.followers) ? profile.followers.length : (profile.followerCount || 0),
+      followingCount: Array.isArray(profile.following) ? profile.following.length : (profile.followingCount || 0),
+      profileUrl: `https://the.fotoapp.co/app/profile?userId=${targetUserId}`,
+      recentPosts: recentPosts.map(p => ({
+        postId: p.postId,
+        imageUrl: p.imageUrl || (Array.isArray(p.images) && p.images[0]?.imageUrl),
+        description: p.description,
+        tags: p.tags,
+        timeStamp: p.timeStamp
+      }))
     };
   }
 }

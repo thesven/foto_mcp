@@ -320,6 +320,97 @@ export async function runFotoClientTests() {
       await client.unfollowUser("");
     }, /Invalid targetUserId provided/);
 
+    const unfollowBatchRes = await client.unfollowUsers(["u_target_1", "u_target_2", "u_me"]);
+    assert.strictEqual(unfollowBatchRes.unfollowedCount, 2);
+
+    // deletePost
+    const delRes = await client.deletePost("p_del_1");
+    assert.strictEqual(delRes.success, true);
+    assert.strictEqual(delRes.postId, "p_del_1");
+
+    await assert.rejects(async () => {
+      await client.deletePost("");
+    }, /Invalid postId provided/);
+
+    // updatePost
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_up")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_up" }, userId: { stringValue: "u_me" }, description: { stringValue: "Updated" }, tags: { arrayValue: { values: [{ stringValue: "Street" }] } } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    };
+
+    const upRes = await client.updatePost({ postId: "p_up", caption: "Updated", tags: ["Street"] });
+    assert.strictEqual(upRes.success, true);
+    assert.strictEqual(upRes.post.description, "Updated");
+
+    await assert.rejects(async () => {
+      await client.updatePost({ postId: "" });
+    }, /Invalid postId provided/);
+
+    await assert.rejects(async () => {
+      await client.updatePost({ postId: "p_up", tags: ["NotARealTag"] });
+    }, /Tag validation failed/);
+
+    // getPost
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_get")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_get" }, userId: { stringValue: "u_me" }, privateMetadataId: { stringValue: "meta_1" } } }), { status: 200 });
+      }
+      if (urlStr.includes("image-private-metadata/meta_1")) {
+        return new Response(JSON.stringify({ fields: { exif: { mapValue: { fields: { Model: { stringValue: "500CM" } } } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const gotPost = await client.getPost("p_get");
+    assert.strictEqual(gotPost.postId, "p_get");
+    assert.strictEqual(gotPost.exif?.Model, "500CM");
+
+    await assert.rejects(async () => {
+      await client.getPost("");
+    }, /Invalid postId provided/);
+
+    await assert.rejects(async () => {
+      await client.getPost("p_missing");
+    }, /not found/);
+
+    // getPhotographerProfile (by userId and by username)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/wildlife_fan")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_wild" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_wild")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "wildlife_fan" }, postIds: { arrayValue: { values: [{ stringValue: "post_w1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/post_w1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "post_w1" }, description: { stringValue: "Elk in meadow" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const profByUsername = await client.getPhotographerProfile({ username: "@wildlife_fan" });
+    assert.strictEqual(profByUsername.username, "wildlife_fan");
+    assert.strictEqual(profByUsername.recentPosts.length, 1);
+
+    const profByUserId = await client.getPhotographerProfile({ userId: "u_wild" });
+    assert.strictEqual(profByUserId.userId, "u_wild");
+
+    await assert.rejects(async () => {
+      await client.getPhotographerProfile({});
+    }, /Please provide either userId or username/);
+
+    await assert.rejects(async () => {
+      await client.getPhotographerProfile({ username: "unknown_person" });
+    }, /not found/);
+
+    await assert.rejects(async () => {
+      await client.getPhotographerProfile({ userId: "u_missing" });
+    }, /not found/);
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

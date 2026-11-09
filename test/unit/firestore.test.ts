@@ -17,7 +17,11 @@ import {
   fetchPostDocument,
   fetchPostsDocuments,
   followUserInFirestore,
-  unfollowUserInFirestore
+  unfollowUserInFirestore,
+  deletePostFromFirestore,
+  updatePostInFirestore,
+  fetchPostWithMetadata,
+  resolveUserByUsername
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -383,6 +387,80 @@ export async function runFirestoreTests() {
 
     const unfollowOk = await unfollowUserInFirestore({ currentUserId: "me", targetUserId: "target", idToken: "tok" });
     assert.strictEqual(unfollowOk, true);
+
+    // deletePostFromFirestore
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_to_delete") && init?.method === "GET") {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_to_delete" }, privateMetadataId: { stringValue: "meta_to_delete" } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    };
+    const delPostOk = await deletePostFromFirestore({ postId: "p_to_delete", userId: "u1", idToken: "tok" });
+    assert.strictEqual(delPostOk, true);
+
+    // updatePostInFirestore - success and permissions
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_update")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_update" }, userId: { stringValue: "u1" }, description: { stringValue: "Old" } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ name: "updated" }), { status: 200 });
+    };
+    const updatedPost = await updatePostInFirestore({ postId: "p_update", userId: "u1", description: "New caption", tags: ["Street"], idToken: "tok" });
+    assert.strictEqual(updatedPost.description, "New caption");
+    assert.deepStrictEqual(updatedPost.tags, ["Street"]);
+
+    // updatePostInFirestore - not found
+    globalThis.fetch = async () => new Response("", { status: 404 });
+    await assert.rejects(
+      async () => {
+        await updatePostInFirestore({ postId: "missing", userId: "u1", description: "x", idToken: "tok" });
+      },
+      /not found/
+    );
+
+    // updatePostInFirestore - permission denied
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { userId: { stringValue: "someone_else" } } }), { status: 200 });
+    await assert.rejects(
+      async () => {
+        await updatePostInFirestore({ postId: "p_other", userId: "u1", description: "x", idToken: "tok" });
+      },
+      /Permission denied/
+    );
+
+    // fetchPostWithMetadata - success with exif
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_meta")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_meta" }, userId: { stringValue: "u1" }, privateMetadataId: { stringValue: "meta_123" } } }), { status: 200 });
+      }
+      if (urlStr.includes("image-private-metadata/meta_123")) {
+        return new Response(JSON.stringify({ fields: { exif: { mapValue: { fields: { Make: { stringValue: "Leica" } } } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const postWithMeta = await fetchPostWithMetadata({ postId: "p_meta", idToken: "tok" });
+    assert(postWithMeta);
+    assert.strictEqual(postWithMeta.postId, "p_meta");
+    assert.strictEqual(postWithMeta.exif?.Make, "Leica");
+
+    const postNotFoundMeta = await fetchPostWithMetadata({ postId: "p_none", idToken: "tok" });
+    assert.strictEqual(postNotFoundMeta, null);
+
+    // resolveUserByUsername
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/street_photog")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "uid_street" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const resolvedUid = await resolveUserByUsername({ username: "@street_photog", idToken: "tok" });
+    assert.strictEqual(resolvedUid, "uid_street");
+
+    const unresolvedUid = await resolveUserByUsername({ username: "unknown_user", idToken: "tok" });
+    assert.strictEqual(unresolvedUid, null);
 
   } finally {
     globalThis.fetch = originalFetch;

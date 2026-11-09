@@ -217,6 +217,101 @@ export async function runMcpServerTests() {
     assert.strictEqual(followSelfRes.isError, true);
     assert(followSelfRes.content[0].text.includes("Cannot follow yourself"));
 
+    // 17. Tool: foto_unfollow_user (single, batch, neither, and error)
+    const unfollowSingleRes = await tools.foto_unfollow_user.handler({ userId: "u_target_1" }, {} as any);
+    assert(!unfollowSingleRes.isError);
+    assert(unfollowSingleRes.content[0].text.includes("u_target_1"));
+
+    const unfollowBatchRes = await tools.foto_unfollow_user.handler({ userIds: ["u_target_1", "u_target_2"] }, {} as any);
+    assert(!unfollowBatchRes.isError);
+    assert(unfollowBatchRes.content[0].text.includes("unfollowedCount"));
+
+    const unfollowNoArgRes = await tools.foto_unfollow_user.handler({}, {} as any);
+    assert.strictEqual(unfollowNoArgRes.isError, true);
+    assert(unfollowNoArgRes.content[0].text.includes("Please provide either userId or userIds"));
+
+    // 18. Tool: foto_delete_post (success and error)
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    const delPostRes = await tools.foto_delete_post.handler({ postId: "p_del" }, {} as any);
+    assert(!delPostRes.isError);
+    assert(delPostRes.content[0].text.includes("Successfully deleted post"));
+
+    // 19. Tool: foto_update_post (success and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_update")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_update" }, userId: { stringValue: "u_browse" }, description: { stringValue: "Old" } } }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ name: "updated" }), { status: 200 });
+    };
+    const updatePostRes = await tools.foto_update_post.handler({ postId: "p_update", caption: "New", tags: ["Street"] }, {} as any);
+    assert(!updatePostRes.isError);
+    assert(updatePostRes.content[0].text.includes("Successfully updated post"));
+
+    const updatePostFail = await tools.foto_update_post.handler({ postId: "p_update", tags: ["NotARealTag"] }, {} as any);
+    assert.strictEqual(updatePostFail.isError, true);
+
+    // 20. Tool: foto_get_post (success and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_get_tool")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_get_tool" }, userId: { stringValue: "u_browse" }, privateMetadataId: { stringValue: "meta_tool" } } }), { status: 200 });
+      }
+      if (urlStr.includes("image-private-metadata/meta_tool")) {
+        return new Response(JSON.stringify({ fields: { exif: { mapValue: { fields: { LensModel: { stringValue: "50mm" } } } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const getPostRes = await tools.foto_get_post.handler({ postId: "p_get_tool" }, {} as any);
+    assert(!getPostRes.isError);
+    assert(getPostRes.content[0].text.includes("p_get_tool"));
+
+    const getPostFail = await tools.foto_get_post.handler({ postId: "p_missing" }, {} as any);
+    assert.strictEqual(getPostFail.isError, true);
+
+    // 21. Tool: foto_get_photographer_profile (success and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/photog_alex")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_alex" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_alex")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "photog_alex" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const getProfRes = await tools.foto_get_photographer_profile.handler({ username: "photog_alex" }, {} as any);
+    assert(!getProfRes.isError);
+    assert(getProfRes.content[0].text.includes("photog_alex"));
+
+    const getProfFail = await tools.foto_get_photographer_profile.handler({}, {} as any);
+    assert.strictEqual(getProfFail.isError, true);
+
+    // 22. Dynamic Resource Templates: foto://posts/{postId} and foto://users/{userId}
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_get_tool")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_get_tool" }, userId: { stringValue: "u_browse" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_alex")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "photog_alex" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const resourceTemplates = (server as any)._registeredResourceTemplates;
+    const postTemplate = resourceTemplates["foto-post-detail"];
+    assert(postTemplate, "foto-post-detail template must be registered");
+    const postTmplRes = await postTemplate.readCallback(new URL("foto://posts/p_get_tool"), { postId: "p_get_tool" } as any, {} as any);
+    assert(postTmplRes.contents.length > 0);
+    assert(postTmplRes.contents[0].text.includes("p_get_tool"));
+
+    const userTemplate = resourceTemplates["foto-user-profile"];
+    assert(userTemplate, "foto-user-profile template must be registered");
+    const userTmplRes = await userTemplate.readCallback(new URL("foto://users/u_alex"), { userId: "u_alex" } as any, {} as any);
+    assert(userTmplRes.contents.length > 0);
+    assert(userTmplRes.contents[0].text.includes("photog_alex"));
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });
