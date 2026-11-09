@@ -20,7 +20,13 @@ import {
   deletePostFromFirestore,
   updatePostInFirestore,
   fetchPostWithMetadata,
-  resolveUserByUsername
+  resolveUserByUsername,
+  likePostInFirestore,
+  unlikePostInFirestore,
+  fetchPostComments,
+  addPostComment,
+  fetchUserNotifications,
+  fetchHomeFeed
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
 
@@ -858,6 +864,112 @@ export class FotoClient {
         timeStamp: p.timeStamp
       }))
     };
+  }
+
+  /**
+   * Likes a post by postId
+   */
+  async likePost(postId: string): Promise<{ success: boolean; postId: string; message: string }> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await likePostInFirestore({
+      postId,
+      userId: authSession.userId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      postId,
+      message: success ? `Successfully liked post "${postId}".` : `Failed to like post "${postId}".`
+    };
+  }
+
+  /**
+   * Unlikes a post by postId
+   */
+  async unlikePost(postId: string): Promise<{ success: boolean; postId: string; message: string }> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await unlikePostInFirestore({
+      postId,
+      userId: authSession.userId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      postId,
+      message: success ? `Successfully unliked post "${postId}".` : `Failed to unlike post "${postId}".`
+    };
+  }
+
+  /**
+   * Fetches comments for a specific post
+   */
+  async getComments(postId: string, limit?: number): Promise<Array<Record<string, any>>> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    return await fetchPostComments({
+      postId,
+      idToken: authSession.idToken,
+      limit
+    });
+  }
+
+  /**
+   * Posts a comment to a Foto post
+   */
+  async postComment(postId: string, text: string): Promise<Record<string, any>> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    if (!text || typeof text !== "string" || !text.trim()) {
+      throw new Error("Comment text cannot be empty.");
+    }
+    const authSession = await getValidAuthSession();
+    const comment = await addPostComment({
+      postId,
+      userId: authSession.userId,
+      text: text.trim(),
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      comment,
+      message: `Successfully posted comment on post "${postId}".`
+    };
+  }
+
+  /**
+   * Fetches recent notifications for the authenticated user
+   */
+  async getNotifications(limit?: number): Promise<Array<Record<string, any>>> {
+    const authSession = await getValidAuthSession();
+    return await fetchUserNotifications({
+      userId: authSession.userId,
+      idToken: authSession.idToken,
+      limit
+    });
+  }
+
+  /**
+   * Fetches the chronological home feed of posts from followed creators
+   */
+  async getHomeFeed(limit?: number): Promise<Array<Record<string, any>>> {
+    const authSession = await getValidAuthSession();
+    return await fetchHomeFeed({
+      userId: authSession.userId,
+      idToken: authSession.idToken,
+      limit
+    });
   }
 }
 

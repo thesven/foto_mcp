@@ -5,6 +5,25 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-09
+
+### Added
+- **Social Graph & Community Suite (25 Total MCP Tools)**:
+  - `foto_like_post`: Like/bookmark posts on Foto using atomic Cloud Firestore `:commit` transforms (`appendMissingElements`).
+  - `foto_unlike_post`: Remove likes from posts using atomic `removeAllFromArray` transforms.
+  - `foto_get_comments`: Retrieve comments and community discussions for any post.
+  - `foto_post_comment`: Publish thoughtful comments and photographic critiques to posts with atomic `commentCount` increments.
+  - `foto_get_notifications`: Read recent community interaction alerts (likes, comments, mentions, follows) from the `notifications` collection.
+  - `foto_get_home_feed`: Retrieve a chronological home timeline of posts published by creators you follow.
+- **Dynamic MCP Resources**:
+  - `foto://my/feed`: Dynamic resource providing live JSON feed of followed creators' latest posts.
+  - `foto://my/notifications`: Dynamic resource stream of recent alerts and community interactions.
+- **Masterclass MCP Prompts**:
+  - `critique_photograph`: Structured masterclass critique evaluating Composition (framing, leading lines), Lighting (quality, dynamic range), Technical & Exposure (depth of field, shutter speed), and Emotional Storytelling.
+  - `curate_photo_series`: Structured sequencing workflow for curating 2 to 5 photos into an emotional, cohesive narrative story.
+- **Test Suite**:
+  - Full modular unit tests for all 6 new social tools, dynamic feed resources, and masterclass prompts, maintaining >97% test coverage.
+
 ## [1.3.0] - 2026-11-09
 
 ### Added

@@ -893,3 +893,287 @@ export async function resolveUserByUsername(params: {
   if (!doc) return null;
   return doc.userId || doc.uid || (typeof doc === "string" ? doc : null);
 }
+
+/**
+ * Likes a post on Foto by atomically appending userId to the post's likes array.
+ */
+export async function likePostInFirestore(params: {
+  postId: string;
+  userId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const postDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${params.postId}`;
+
+  const res = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          transform: {
+            document: postDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "likes",
+                appendMissingElements: {
+                  values: [{ stringValue: params.userId }]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    })
+  });
+  return res.ok;
+}
+
+/**
+ * Unlikes a post on Foto by atomically removing userId from the post's likes array.
+ */
+export async function unlikePostInFirestore(params: {
+  postId: string;
+  userId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const postDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${params.postId}`;
+
+  const res = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          transform: {
+            document: postDocPath,
+            fieldTransforms: [
+              {
+                fieldPath: "likes",
+                removeAllFromArray: {
+                  values: [{ stringValue: params.userId }]
+                }
+              }
+            ]
+          }
+        }
+      ]
+    })
+  });
+  return res.ok;
+}
+
+/**
+ * Fetches comments for a specific post.
+ */
+export async function fetchPostComments(params: {
+  postId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<Array<Record<string, any>>> {
+  const queryUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery`;
+  const limit = Math.min(params.limit || 20, 50);
+
+  const res = await fetch(queryUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "comments" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "postId" },
+            op: "EQUAL",
+            value: { stringValue: params.postId }
+          }
+        },
+        limit
+      }
+    })
+  });
+
+  if (!res.ok) return [];
+  const rows = (await res.json()) as any[];
+  if (!Array.isArray(rows)) return [];
+
+  const comments: Array<Record<string, any>> = [];
+  for (const row of rows) {
+    if (row.document?.fields) {
+      const commentData: Record<string, any> = {};
+      for (const [k, v] of Object.entries(row.document.fields)) {
+        commentData[k] = fromFirestoreValue(v as any);
+      }
+      commentData.commentId = row.document.name.split("/").pop();
+      comments.push(commentData);
+    }
+  }
+  return comments;
+}
+
+/**
+ * Adds a new comment to a post and increments the post's commentCount.
+ */
+export async function addPostComment(params: {
+  postId: string;
+  userId: string;
+  username?: string;
+  text: string;
+  idToken: string;
+}): Promise<Record<string, any>> {
+  const commentId = crypto.randomUUID();
+  const commentData = {
+    commentId,
+    postId: params.postId,
+    userId: params.userId,
+    username: params.username || `user_${params.userId.substring(0, 8)}`,
+    text: params.text,
+    createdAt: new Date().toISOString()
+  };
+
+  await setFirestoreDocument({
+    collectionPath: "comments",
+    documentId: commentId,
+    data: commentData,
+    idToken: params.idToken
+  });
+
+  // Increment commentCount on post
+  try {
+    const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+    const postDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${params.postId}`;
+    await fetch(commitUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.idToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        writes: [
+          {
+            transform: {
+              document: postDocPath,
+              fieldTransforms: [
+                {
+                  fieldPath: "commentCount",
+                  increment: { integerValue: "1" }
+                }
+              ]
+            }
+          }
+        ]
+      })
+    });
+  } catch {
+    // Non-fatal
+  }
+
+  return commentData;
+}
+
+/**
+ * Fetches recent notifications for a user.
+ */
+export async function fetchUserNotifications(params: {
+  userId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<Array<Record<string, any>>> {
+  const queryUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery`;
+  const limit = Math.min(params.limit || 20, 50);
+
+  const res = await fetch(queryUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: "notifications" }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: "recipientId" },
+            op: "EQUAL",
+            value: { stringValue: params.userId }
+          }
+        },
+        limit
+      }
+    })
+  });
+
+  if (!res.ok) return [];
+  const rows = (await res.json()) as any[];
+  if (!Array.isArray(rows)) return [];
+
+  const notifications: Array<Record<string, any>> = [];
+  for (const row of rows) {
+    if (row.document?.fields) {
+      const notif: Record<string, any> = {};
+      for (const [k, v] of Object.entries(row.document.fields)) {
+        notif[k] = fromFirestoreValue(v as any);
+      }
+      notif.notificationId = row.document.name.split("/").pop();
+      notifications.push(notif);
+    }
+  }
+  return notifications;
+}
+
+/**
+ * Fetches recent posts from photographers the user follows to construct the chronological home feed.
+ */
+export async function fetchHomeFeed(params: {
+  userId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<Array<Record<string, any>>> {
+  // 1. Fetch user profile to get following list
+  const profile = await fetchUserProfile({ userId: params.userId, idToken: params.idToken });
+  const following: string[] = Array.isArray(profile?.following) ? profile.following : [];
+
+  if (following.length === 0) {
+    return [];
+  }
+
+  // 2. Fetch recent post IDs from each followed user
+  const limit = Math.min(params.limit || 20, 50);
+  const followedProfiles = await Promise.all(
+    following.slice(0, 15).map(uid => fetchUserProfile({ userId: uid, idToken: params.idToken }))
+  );
+
+  const candidatePostIds: string[] = [];
+  for (const fp of followedProfiles) {
+    if (fp && Array.isArray(fp.postIds)) {
+      candidatePostIds.push(...fp.postIds.slice(-5));
+    }
+  }
+
+  // Deduplicate and take most recent
+  const uniqueIds = Array.from(new Set(candidatePostIds)).reverse().slice(0, limit);
+  const postDocs = await fetchPostsDocuments({ postIds: uniqueIds, idToken: params.idToken });
+
+  return postDocs.map(doc => ({
+    postId: doc.postId || "",
+    userId: doc.userId || "",
+    description: doc.description || "",
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    imageUrl: doc.imageUrl || (Array.isArray(doc.images) && doc.images[0]?.imageUrl) || "",
+    imageWidth: doc.imageWidth,
+    imageHeight: doc.imageHeight,
+    likesCount: Array.isArray(doc.likes) ? doc.likes.length : 0,
+    commentCount: typeof doc.commentCount === "number" ? doc.commentCount : 0,
+    timeStamp: doc.timeStamp,
+    postUrl: `https://the.fotoapp.co/app/profile?userId=${doc.userId}`
+  }));
+}

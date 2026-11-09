@@ -411,6 +411,69 @@ export async function runFotoClientTests() {
       await client.getPhotographerProfile({ userId: "u_missing" });
     }, /not found/);
 
+    // likePost & unlikePost
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    const likeRes = await client.likePost("p_like_1");
+    assert.strictEqual(likeRes.success, true);
+    assert.strictEqual(likeRes.postId, "p_like_1");
+
+    await assert.rejects(async () => {
+      await client.likePost("");
+    }, /Invalid postId provided/);
+
+    const unlikeRes = await client.unlikePost("p_like_1");
+    assert.strictEqual(unlikeRes.success, true);
+
+    await assert.rejects(async () => {
+      await client.unlikePost("");
+    }, /Invalid postId provided/);
+
+    // getComments & postComment
+    globalThis.fetch = async () => new Response(JSON.stringify([{ document: { name: "projects/.../comments/c1", fields: { text: { stringValue: "Nice!" } } } }]), { status: 200 });
+    const clientComments = await client.getComments("p_like_1");
+    assert.strictEqual(clientComments.length, 1);
+
+    await assert.rejects(async () => {
+      await client.getComments("");
+    }, /Invalid postId provided/);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "c_new" }), { status: 200 });
+    const postComRes = await client.postComment("p_like_1", "Stunning tones");
+    assert.strictEqual(postComRes.success, true);
+    assert.strictEqual(postComRes.comment.text, "Stunning tones");
+
+    await assert.rejects(async () => {
+      await client.postComment("", "text");
+    }, /Invalid postId provided/);
+
+    await assert.rejects(async () => {
+      await client.postComment("p1", "");
+    }, /Comment text cannot be empty/);
+
+    // getNotifications
+    globalThis.fetch = async () => new Response(JSON.stringify([{ document: { name: "n1", fields: { type: { stringValue: "follow" } } } }]), { status: 200 });
+    const notifs = await client.getNotifications();
+    assert.strictEqual(notifs.length, 1);
+
+    // getHomeFeed
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_browse") || urlStr.includes("user-profiles/u_me")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_target_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_target_1")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "p_feed_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_feed_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_feed_1" }, userId: { stringValue: "u_target_1" }, description: { stringValue: "Feed post" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const feed = await client.getHomeFeed();
+    assert.strictEqual(feed.length, 1);
+    assert.strictEqual(feed[0].postId, "p_feed_1");
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

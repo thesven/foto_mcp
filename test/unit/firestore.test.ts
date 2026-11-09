@@ -21,7 +21,13 @@ import {
   deletePostFromFirestore,
   updatePostInFirestore,
   fetchPostWithMetadata,
-  resolveUserByUsername
+  resolveUserByUsername,
+  likePostInFirestore,
+  unlikePostInFirestore,
+  fetchPostComments,
+  addPostComment,
+  fetchUserNotifications,
+  fetchHomeFeed
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -461,6 +467,86 @@ export async function runFirestoreTests() {
 
     const unresolvedUid = await resolveUserByUsername({ username: "unknown_user", idToken: "tok" });
     assert.strictEqual(unresolvedUid, null);
+
+    // likePostInFirestore & unlikePostInFirestore
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    const likeOk = await likePostInFirestore({ postId: "p_like", userId: "u1", idToken: "tok" });
+    assert.strictEqual(likeOk, true);
+
+    const unlikeOk = await unlikePostInFirestore({ postId: "p_like", userId: "u1", idToken: "tok" });
+    assert.strictEqual(unlikeOk, true);
+
+    // fetchPostComments
+    globalThis.fetch = async (url: any, init: any) => {
+      return new Response(
+        JSON.stringify([
+          {
+            document: {
+              name: "projects/.../comments/c1",
+              fields: {
+                text: { stringValue: "Great lighting!" },
+                username: { stringValue: "anna_photo" }
+              }
+            }
+          }
+        ]),
+        { status: 200 }
+      );
+    };
+    const comments = await fetchPostComments({ postId: "p1", idToken: "tok" });
+    assert.strictEqual(comments.length, 1);
+    assert.strictEqual(comments[0].text, "Great lighting!");
+    assert.strictEqual(comments[0].commentId, "c1");
+
+    // addPostComment
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "projects/.../comments/new_c" }), { status: 200 });
+    const addedComment = await addPostComment({ postId: "p1", userId: "u1", text: "Inspiring shot!", idToken: "tok" });
+    assert.strictEqual(addedComment.text, "Inspiring shot!");
+    assert.strictEqual(addedComment.postId, "p1");
+
+    // fetchUserNotifications
+    globalThis.fetch = async () => {
+      return new Response(
+        JSON.stringify([
+          {
+            document: {
+              name: "projects/.../notifications/n1",
+              fields: {
+                type: { stringValue: "like" },
+                senderUsername: { stringValue: "bob" }
+              }
+            }
+          }
+        ]),
+        { status: 200 }
+      );
+    };
+    const notifs = await fetchUserNotifications({ userId: "u1", idToken: "tok" });
+    assert.strictEqual(notifs.length, 1);
+    assert.strictEqual(notifs[0].type, "like");
+
+    // fetchHomeFeed
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_me")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_friend" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_friend")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "p_friend_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_friend_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_friend_1" }, userId: { stringValue: "u_friend" }, description: { stringValue: "Friend's photo" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const feed = await fetchHomeFeed({ userId: "u_me", idToken: "tok" });
+    assert.strictEqual(feed.length, 1);
+    assert.strictEqual(feed[0].postId, "p_friend_1");
+
+    // fetchHomeFeed with empty following
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [] } } } }), { status: 200 });
+    const emptyFeed = await fetchHomeFeed({ userId: "u_lonely", idToken: "tok" });
+    assert.strictEqual(emptyFeed.length, 0);
 
   } finally {
     globalThis.fetch = originalFetch;

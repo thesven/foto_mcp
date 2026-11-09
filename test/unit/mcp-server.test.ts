@@ -312,6 +312,75 @@ export async function runMcpServerTests() {
     assert(userTmplRes.contents.length > 0);
     assert(userTmplRes.contents[0].text.includes("photog_alex"));
 
+    // 23. Tools: foto_like_post & foto_unlike_post
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    const likeToolRes = await tools.foto_like_post.handler({ postId: "p_like_tool" }, {} as any);
+    assert(!likeToolRes.isError);
+    assert(likeToolRes.content[0].text.includes("Successfully liked post"));
+
+    const unlikeToolRes = await tools.foto_unlike_post.handler({ postId: "p_like_tool" }, {} as any);
+    assert(!unlikeToolRes.isError);
+    assert(unlikeToolRes.content[0].text.includes("Successfully unliked post"));
+
+    // 24. Tools: foto_get_comments & foto_post_comment
+    globalThis.fetch = async () => new Response(JSON.stringify([{ document: { name: "c1", fields: { text: { stringValue: "Great composition" } } } }]), { status: 200 });
+    const getComRes = await tools.foto_get_comments.handler({ postId: "p_like_tool" }, {} as any);
+    assert(!getComRes.isError);
+    assert(getComRes.content[0].text.includes("Great composition"));
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "c_new" }), { status: 200 });
+    const postComRes = await tools.foto_post_comment.handler({ postId: "p_like_tool", text: "Lovely shadow play" }, {} as any);
+    assert(!postComRes.isError);
+    assert(postComRes.content[0].text.includes("Lovely shadow play"));
+
+    // 25. Tools: foto_get_notifications & foto_get_home_feed
+    globalThis.fetch = async () => new Response(JSON.stringify([{ document: { name: "n1", fields: { type: { stringValue: "comment" } } } }]), { status: 200 });
+    const notifsRes = await tools.foto_get_notifications.handler({}, {} as any);
+    assert(!notifsRes.isError);
+    assert(notifsRes.content[0].text.includes("comment"));
+
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_browse")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_target_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_target_1")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "p_feed_mcp" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_feed_mcp")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_feed_mcp" }, description: { stringValue: "Morning fog" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const feedRes = await tools.foto_get_home_feed.handler({}, {} as any);
+    assert(!feedRes.isError);
+    assert(feedRes.content[0].text.includes("Morning fog"));
+
+    // 26. Dynamic Resources: foto://my/feed and foto://my/notifications
+    const feedResource = resources["foto://my/feed"];
+    assert(feedResource, "foto://my/feed resource must be registered");
+    const feedResourceRes = await feedResource.readCallback(new URL("foto://my/feed"), {} as any);
+    assert(feedResourceRes.contents.length > 0);
+    assert(feedResourceRes.contents[0].text.includes("Morning fog"));
+
+    const notifResource = resources["foto://my/notifications"];
+    assert(notifResource, "foto://my/notifications resource must be registered");
+    globalThis.fetch = async () => new Response(JSON.stringify([{ document: { name: "n2", fields: { type: { stringValue: "like" } } } }]), { status: 200 });
+    const notifResourceRes = await notifResource.readCallback(new URL("foto://my/notifications"), {} as any);
+    assert(notifResourceRes.contents.length > 0);
+    assert(notifResourceRes.contents[0].text.includes("like"));
+
+    // 27. Masterclass Prompts: critique_photograph and curate_photo_series
+    const critiquePrompt = prompts["critique_photograph"];
+    assert(critiquePrompt, "critique_photograph prompt must be registered");
+    const critiqueRes = await critiquePrompt.callback({}, {} as any);
+    assert(critiqueRes.messages[0].content.text.includes("Composition & Framing"));
+
+    const seriesPrompt = prompts["curate_photo_series"];
+    assert(seriesPrompt, "curate_photo_series prompt must be registered");
+    const seriesRes = await seriesPrompt.callback({}, {} as any);
+    assert(seriesRes.messages[0].content.text.includes("Pacing & Flow"));
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });

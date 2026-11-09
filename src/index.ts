@@ -11,7 +11,7 @@ const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "1.3.0"
+  version: "1.4.0"
 });
 
 // Tool 1: foto_auth_status
@@ -576,6 +576,140 @@ server.tool(
   }
 );
 
+// Tool 20: foto_like_post
+server.tool(
+  "foto_like_post",
+  "Like or bookmark a post on Foto by post ID.",
+  {
+    postId: z.string().describe("The post ID to like")
+  },
+  async ({ postId }) => {
+    try {
+      const result = await client.likePost(postId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to like post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 21: foto_unlike_post
+server.tool(
+  "foto_unlike_post",
+  "Remove your like from a Foto post by post ID.",
+  {
+    postId: z.string().describe("The post ID to unlike")
+  },
+  async ({ postId }) => {
+    try {
+      const result = await client.unlikePost(postId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to unlike post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 22: foto_get_comments
+server.tool(
+  "foto_get_comments",
+  "Retrieve comments and discussions on a Foto post by post ID.",
+  {
+    postId: z.string().describe("The post ID to get comments for"),
+    limit: z.number().int().positive().max(50).optional().describe("Maximum comments to retrieve (default: 20)")
+  },
+  async ({ postId, limit }) => {
+    try {
+      const comments = await client.getComments(postId, limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ postId, count: comments.length, comments }, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch comments for post "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 23: foto_post_comment
+server.tool(
+  "foto_post_comment",
+  "Post a thoughtful comment or critique on a Foto post.",
+  {
+    postId: z.string().describe("The post ID to comment on"),
+    text: z.string().min(1).describe("Comment text or photographic reflection")
+  },
+  async ({ postId, text }) => {
+    try {
+      const result = await client.postComment(postId, text);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to post comment on "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 24: foto_get_notifications
+server.tool(
+  "foto_get_notifications",
+  "Retrieve recent notifications and community interactions on your Foto account (likes, comments, mentions, follows).",
+  {
+    limit: z.number().int().positive().max(50).optional().describe("Maximum notifications to retrieve (default: 20)")
+  },
+  async ({ limit }) => {
+    try {
+      const notifications = await client.getNotifications(limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ count: notifications.length, notifications }, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch notifications: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 25: foto_get_home_feed
+server.tool(
+  "foto_get_home_feed",
+  "Retrieve your chronological Foto home timeline of posts from creators you follow.",
+  {
+    limit: z.number().int().positive().max(50).optional().describe("Maximum feed posts to return (default: 20)")
+  },
+  async ({ limit }) => {
+    try {
+      const feed = await client.getHomeFeed(limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ count: feed.length, posts: feed }, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch home feed: ${err.message}` }]
+      };
+    }
+  }
+);
+
 // MCP Resource: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",
@@ -592,6 +726,52 @@ server.registerResource(
           uri: "foto://curated-tags",
           mimeType: "application/json",
           text: JSON.stringify(FOTO_ALLOWED_TAGS, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Dynamic Resource: User Home Feed
+server.registerResource(
+  "foto-my-feed",
+  "foto://my/feed",
+  {
+    title: "My Foto Home Feed",
+    description: "Chronological stream of recent posts from followed creators on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const feed = await client.getHomeFeed(20);
+    return {
+      contents: [
+        {
+          uri: "foto://my/feed",
+          mimeType: "application/json",
+          text: JSON.stringify(feed, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Dynamic Resource: User Notifications
+server.registerResource(
+  "foto-my-notifications",
+  "foto://my/notifications",
+  {
+    title: "My Foto Notifications",
+    description: "Recent community interaction alerts on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const notifs = await client.getNotifications(20);
+    return {
+      contents: [
+        {
+          uri: "foto://my/notifications",
+          mimeType: "application/json",
+          text: JSON.stringify(notifs, null, 2)
         }
       ]
     };
@@ -666,6 +846,63 @@ Here are the Foto guidelines to follow:
 3. Narrative & Context: Draft a thoughtful caption discussing the creative intent, subject, location, or technical conditions.
 4. Privacy: GPS data will be automatically stripped upon publishing.
 5. Review draft: Preview the post with foto_draft_post before publishing live with foto_publish_post.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt: Masterclass Photographic Critique
+server.registerPrompt(
+  "critique_photograph",
+  {
+    title: "Masterclass Photographic Critique",
+    description: "Provide an insightful, constructive critique evaluating composition, lighting, exposure, and emotional storytelling."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please critique my photograph for presentation on Foto (https://fotoapp.co/).
+
+Analyze the photo along these masterclass dimensions:
+1. Composition & Framing: Rule of thirds, leading lines, framing, negative space, aspect ratio balance.
+2. Light & Atmosphere: Direction of light, quality (hard vs soft), dynamic range, highlights/shadows.
+3. Technical & Exposure: Depth of field, aperture choice, shutter speed motion control, ISO grain, sharpness.
+4. Emotional & Narrative Resonance: Mood, storytelling, artistic intent, and connection to the subject.
+5. Recommendation: Suggest 1 to 3 tags from Foto's 303 curated tags list and draft an evocative caption.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt: Multi-Image Series Curation
+server.registerPrompt(
+  "curate_photo_series",
+  {
+    title: "Curate Sequential Photo Series",
+    description: "Sequence 2 to 5 images into an evocative, cohesive narrative story adhering to Foto platform guidelines."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please help me curate and publish a multi-image Series (2 to 5 photos) for Foto.
+
+Guidelines:
+1. Pacing & Flow: Order the frames to build visual rhythm (e.g. establishing wide frame -> medium interaction -> intimate detail -> closing tone).
+2. Continuity: Ensure color grading, aspect ratio consistency, and thematic harmony across all frames.
+3. Whitelist Tags: Select 1 to 3 curated tags matching the series genre and technique.
+4. Preview & Validate: Verify all images with foto_publish_series (dryRun: true) before publishing.`
           }
         }
       ]

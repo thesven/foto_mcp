@@ -1,6 +1,6 @@
 # Foto MCP Server (`foto_mcp`)
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-97.9%25-brightgreen.svg)]()
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-orange.svg)]()
@@ -158,7 +158,7 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (19 Tools)
+## Complete MCP Tool Suite (25 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
@@ -178,6 +178,12 @@ export FOTO_PASSWORD="your_password"
 | `foto_delete_post` | Deletes a published post by post ID. Automatically cleans up post documents, private metadata, and updates profile post lists. | `postId` (string) |
 | `foto_update_post` | Updates an existing post's caption or curated tags (must be 1 to 3 items from the 303 whitelist). | `postId` (string), `caption?` (string), `tags?` (string[]) |
 | `foto_get_post` | Retrieves full post document by post ID, resolving camera EXIF metadata, image URLs, and dimensions. | `postId` (string) |
+| `foto_like_post` | Likes or bookmarks a post on Foto by post ID using atomic Firestore array transforms. | `postId` (string) |
+| `foto_unlike_post` | Removes your like from a Foto post by post ID. | `postId` (string) |
+| `foto_get_comments` | Retrieves comments and community discussions for a post by post ID. | `postId` (string), `limit?` (number, default: 20) |
+| `foto_post_comment` | Posts a thoughtful comment or critique to a Foto post and updates the post comment counter. | `postId` (string), `text` (string) |
+| `foto_get_notifications` | Retrieves recent community alerts on your Foto account (likes, comments, mentions, follows). | `limit?` (number, default: 20) |
+| `foto_get_home_feed` | Retrieves your chronological home timeline of posts published by creators you follow. | `limit?` (number, default: 20) |
 | `foto_get_photographer_profile` | Looks up any photographer's public profile on Foto by user ID or username handle (e.g. `@elena_fineart`). | `userId?` (string), `username?` (string) |
 | `foto_get_user_profile` | Retrieves current authenticated user's profile info, bio, and published post stats. | *None* |
 | `foto_sync_instagram` | Migrates posts from an Instagram HTML export: strips hashtags, maps curated tags, scrubs GPS, and checks against published posts. | `htmlFilePath` (string), `mediaDir?` (string), `maxPosts?` (number), `dryRun?` (boolean) |
@@ -190,9 +196,13 @@ export FOTO_PASSWORD="your_password"
 * **`foto://curated-tags`**: Exposes the complete JSON array of all 303 curated tags permitted on Foto. AI clients can read and cache this resource to ensure autocomplete and zero invalid tag errors.
 * **`foto://posts/{postId}`**: Dynamic resource template resolving live post JSON documents and camera EXIF metadata.
 * **`foto://users/{userId}`**: Dynamic resource template resolving public creator profiles, bios, stats, and recent post IDs.
+* **`foto://my/feed`**: Dynamic resource stream of the user's chronological home timeline of posts from followed creators.
+* **`foto://my/notifications`**: Dynamic resource stream of incoming community interaction alerts (likes, comments, mentions, follows).
 
 ### Prompts
-* **`curate_foto_post`**: A structured prompt template guiding the model to inspect EXIF metadata, select canonical tags, formulate a caption focusing on narrative rather than hashtag spam, and preview drafts with `foto_draft_post`.
+* **`curate_foto_post`**: Formulates a thoughtful photographic post adhering to platform ethos (no hashtags, 1-3 curated tags, technical EXIF summary).
+* **`critique_photograph`**: In-depth constructive critique analyzing Composition, Lighting, Storytelling, and Exposure.
+* **`curate_photo_series`**: Pacing and visual flow guidance for sequencing 2 to 5 photos into an emotional narrative series.
 
 ---
 
