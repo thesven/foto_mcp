@@ -409,13 +409,17 @@ Here are the Foto guidelines to follow:
   }
 );
 
+export { server, client };
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("Foto MCP Server running on stdio transport.");
 }
 
-main().catch((err) => {
-  console.error("Fatal error starting Foto MCP Server:", err);
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== "test" && !process.env.FOTO_MCP_TEST) {
+  main().catch((err) => {
+    console.error("Fatal error starting Foto MCP Server:", err);
+    process.exit(1);
+  });
+}

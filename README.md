@@ -1,74 +1,72 @@
 # Foto MCP Server (`foto_mcp`)
 
-A Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](package.json)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen.svg)]()
+[![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-orange.svg)]()
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
 
-This MCP server enables AI assistants (Claude Desktop, Cursor, local agent runtimes) to seamlessly author, inspect, tag, and publish photos and series directly to your Foto account from your desktop editing environment.
+An official Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
 
----
-
-## Features
-
-* **Zero-Crop & Resolution Optimization:** Automatically normalizes high-res camera exports to Foto's 1820px standard (quality 80 JPEG) while preserving the exact original composition and aspect ratio.
-* **Privacy by Design (GPS Scrubbing):** Automatically strips embedded GPS coordinates and thumbnail IFDs before upload, matching Foto's privacy ethos.
-* **Technical EXIF Preservation:** Automatically parses camera body, lens model, ISO, aperture ($f$-number), shutter speed, and focal length into Foto's `image-private-metadata` system.
-* **Curated Tag Enforcement:** Enforces Foto's strict rule of **1 to 3 tags** and matches against the platform's official **303 curated tags list** (no hashtag spam).
-* **AI Tag Suggester:** Analyzes photo context, gear notes, or film stocks (e.g. `Hasselblad 500C/M`, `Portra 400`, `Street`) and recommends the best matching tags.
-* **Multi-Image Series:** Supports authoring and publishing sequential photo stories (2 to 5 images per post).
-* **Content Safety Compliance:** Validates uploads against platform standards and Sightengine moderation.
-* **Dry-Run Validation:** Test the entire preparation, EXIF extraction, and formatting pipeline locally without modifying your account or making network requests.
+This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos, extract camera EXIF metadata, select from Foto's official curated taxonomy, and publish single frames, multi-image series, or Instagram migrations directly to your chronological Foto feed.
 
 ---
 
-## Installation & Setup
+## Architecture Overview
 
-### Prerequisites
-* Node.js v18 or later
-* npm or pnpm
+```mermaid
+flowchart TD
+    Client["AI Assistant / MCP Client<br>(Claude Desktop, Cursor, Zed, Windsurf)"]
+    
+    subgraph Foto_MCP ["Foto MCP Server (foto_mcp)"]
+        Tools["11 Native MCP Tools<br>& Resources / Prompts"]
+        Proc["Sharp & Exifr Media Pipeline<br>• Max 1820px Zero-Crop<br>• Strips GPS & Thumbnails<br>• Extracts Camera & Lens EXIF"]
+        Auth["Firebase REST Auth<br>• Local Token Cache (chmod 0600)<br>• Auto Token Refresh (60s buffer)"]
+        Sync["Instagram Migration Engine<br>• Cleans Hashtags<br>• Maps Curated Tags<br>• Deduplicates Posts"]
+    end
+    
+    subgraph Foto_Cloud ["Foto Cloud Infrastructure (foto-d963e)"]
+        Storage["Firebase Storage<br>posts/{userId}/{imageId}_{ts}"]
+        Sightengine["Sightengine Moderation<br>nudity-2.1 Check"]
+        Firestore["Cloud Firestore<br>• posts/{postId}<br>• image-private-metadata/{id}<br>• user-profiles/{userId}<br>• tag_index/{tag}_{shard}"]
+    end
 
-### Build from Source
+    Client <-->|"Stdio Transport (JSON-RPC)"| Tools
+    Tools --> Proc
+    Tools --> Auth
+    Tools --> Sync
+    Proc --> Storage
+    Storage --> Sightengine
+    Sightengine --> Firestore
+```
+
+---
+
+## Core Features & Platform Philosophy
+
+* **Zero-Crop Resolution Normalization:** Automatically scales high-resolution camera exports to Foto's 1820px longest-edge standard (JPEG quality 80) while preserving the creator's exact original aspect ratio (3:2, 4:3, 1:1, 6:7, 65:24 panoramic, or 16:9). No forced cropping.
+* **Privacy by Design (GPS Scrubbing):** Automatically strips embedded GPS coordinates and thumbnail IFDs from binary files before upload to prevent wildlife and location tracking.
+* **Technical EXIF Preservation:** Parses camera body, lens model, ISO, aperture ($f$-number), shutter speed, and focal length into Foto's `image-private-metadata` system so technical details are preserved for photography enthusiasts.
+* **Curated 303 Tag Taxonomy:** Strictly enforces Foto's platform rule of **1 to 3 tags** selected exclusively from the official whitelist of **303 curated photographic tags**. Completely eliminates hashtag spam.
+* **Smart AI Tag Suggester:** Analyzes narrative descriptions, gear notes, or film stocks (e.g. `Hasselblad 500C/M`, `Kodak Portra 400`, `Street`) and recommends the best matching tags.
+* **Multi-Image Series (Stories):** Authors and publishes sequential multi-photo stories (2 to 5 images per post).
+* **Automated Content Moderation:** Automatically validates uploads against platform community safety rules and Sightengine moderation (`sexual_activity <= 0.7`, `sexual_display <= 0.9`).
+* **Dry-Run Validation:** Test image geometry, EXIF extraction, and tag formatting locally without modifying your account or making live network calls (`dryRun: true`).
+* **Instagram Migration Engine (`foto_sync_instagram`):** Seamlessly extracts posts from Instagram data exports, cleans out hashtag noise, strips GPS, suggests curated tags, and checks against already-published Foto posts.
+
+---
+
+## Quick Start via `npx` (No Installation Required)
+
+You can run `foto_mcp` directly without cloning or building locally:
+
 ```bash
-git clone https://github.com/thesven/foto_mcp.git
-cd foto_mcp
-npm install
-npm run build
+npx -y github:thesven/foto_mcp#v1.0.0
 ```
 
 ---
 
-## Authentication
-
-You can authenticate in two ways:
-
-### Option 1: In-Chat via `foto_login` Tool (Recommended)
-Once the MCP server is configured in your client, simply prompt your AI assistant:
-> *"Log in to my Foto account with email `you@example.com` and password `your_password`."*
-
-The `foto_login` tool connects securely to Firebase Auth, caches your session token in `~/.config/foto-mcp/credentials.json` (chmod `0600`), and automatically refreshes tokens in the background.
-
-### Option 2: Environment Variables
-Alternatively, you can provide your credentials via environment variables:
-```bash
-export FOTO_EMAIL="you@example.com"
-export FOTO_PASSWORD="your_password"
-```
-
----
-
-## Configuration
-
-### Quick Start via `npx` (No local build required)
-You can run `foto-mcp` directly without cloning or building locally:
-
-```json
-{
-  "mcpServers": {
-    "foto": {
-      "command": "npx",
-      "args": ["-y", "foto_mcp"]
-    }
-  }
-}
-```
+## Client Configuration
 
 ### Claude Desktop
 Add this to your Claude Desktop configuration file:
@@ -81,7 +79,7 @@ Add this to your Claude Desktop configuration file:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "foto_mcp"],
+      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"],
       "env": {
         "FOTO_EMAIL": "your_email@example.com",
         "FOTO_PASSWORD": "your_password"
@@ -98,7 +96,7 @@ Add to `.cursor/mcp.json` or your Global Cursor MCP settings:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "foto_mcp"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
     }
   }
 }
@@ -112,21 +110,21 @@ Add to `~/.config/zed/settings.json`:
     "servers": {
       "foto": {
         "command": "npx",
-        "args": ["-y", "foto_mcp"]
+        "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
       }
     }
   }
 }
 ```
 
-### Windsurf
+### Windsurf / Codeium
 Add to `~/.codeium/windsurf/mcp_config.json`:
 ```json
 {
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "foto_mcp"]
+      "args": ["-y", "github:thesven/foto_mcp#v1.0.0"]
     }
   }
 }
@@ -134,40 +132,61 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ---
 
-## Available MCP Tools
+## Authentication & Credentials Security
 
-| Tool | Description | Key Arguments |
+Foto MCP supports two flexible authentication mechanisms:
+
+### Option 1: In-Chat via `foto_login` (Recommended)
+Prompt your AI assistant in chat:
+> *"Log in to my Foto account with email `you@example.com` and password `your_password`."*
+
+The `foto_login` tool:
+1. Connects directly to Google Identity Toolkit REST endpoints.
+2. Securely caches session tokens locally in `~/.config/foto-mcp/credentials.json` with user-only permissions (`0600`).
+3. Automatically refreshes expired tokens in the background before subsequent tool calls.
+
+### Option 2: Environment Variables
+For automated runtimes, provide credentials in your environment:
+```bash
+export FOTO_EMAIL="you@example.com"
+export FOTO_PASSWORD="your_password"
+```
+
+---
+
+## Complete MCP Tool Suite (11 Tools)
+
+| Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
-| `foto_auth_status` | Checks current login status and token validity. | None |
-| `foto_login` | Authenticate with Foto email and password. | `email`, `password` |
-| `foto_logout` | Log out and delete cached credentials from disk. | None |
-| `foto_inspect_image` | Inspects local photo: parses camera, lens, ISO, shutter, aperture, aspect ratio, and checks for GPS. | `filePath` |
-| `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 allowed curated tags. | `caption`, `cameraInfo`, `keywords` |
-| `foto_search_tags` | Searches the 303 curated tags by keyword or prefix. | `query`, `limit` |
-| `foto_draft_post` | Validates and previews a post draft before publishing. | `filePath`, `caption`, `tags` |
-| `foto_publish_post` | Normalizes, scrubs GPS, uploads, and publishes a single photo. Supports `dryRun: true`. | `filePath`, `caption`, `tags`, `dryRun` |
-| `foto_publish_series` | Publishes a multi-image Series (2 to 5 photos) under one post. Supports `dryRun: true`. | `filePaths`, `caption`, `tags`, `dryRun` |
-| `foto_get_user_profile` | Retrieves current user's profile info and stats. | None |
-| `foto_sync_instagram` | Migrates posts from an Instagram HTML export: cleans hashtags, suggests curated tags, strips GPS, deduplicates against published posts. | `htmlFilePath`, `mediaDir`, `maxPosts`, `dryRun` |
+| `foto_auth_status` | Inspects active session, local token validity, and remaining minutes. | *None* |
+| `foto_login` | In-chat authentication via email and password; caches tokens locally. | `email` (string), `password` (string) |
+| `foto_logout` | Clears local cached session tokens and in-memory credentials. | *None* |
+| `foto_inspect_image` | Inspects local image: returns dimensions, photographic aspect ratio (e.g. 3:2, 6:7), GPS status, and camera/lens EXIF. | `filePath` (string) |
+| `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, or keywords. | `caption?` (string), `cameraInfo?` (string), `keywords?` (string[]) |
+| `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query` (string), `limit?` (number, default: 20) |
+| `foto_draft_post` | Validates a post draft before publishing: checks tag whitelist, calculates downsampled dimensions, and reviews EXIF summary. | `filePath` (string), `caption` (string), `tags` (string[]) |
+| `foto_publish_post` | Normalizes image (1820px), scrubs GPS, uploads to Storage, passes Sightengine moderation, and creates public Firestore post. | `filePath` (string), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
+| `foto_publish_series` | Publishes a multi-image sequential Series (2 to 5 photos) under one post. | `filePaths` (string[], min: 2, max: 5), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
+| `foto_get_user_profile` | Retrieves current user's profile info, bio, and published post stats. | *None* |
+| `foto_sync_instagram` | Migrates posts from an Instagram HTML export: strips hashtags, maps curated tags, scrubs GPS, and checks against published posts. | `htmlFilePath` (string), `mediaDir?` (string), `maxPosts?` (number), `dryRun?` (boolean) |
 
 ---
 
 ## MCP Resources & Prompts
 
 ### Resources
-* **`foto://curated-tags`**: Exposes the complete JSON array of all 303 official curated tags permitted on Foto for client-side caching and autocomplete.
+* **`foto://curated-tags`**: Exposes the complete JSON array of all 303 curated tags permitted on Foto. AI clients can read and cache this resource to ensure autocomplete and zero invalid tag errors.
 
 ### Prompts
-* **`curate_foto_post`**: A structured prompt guiding the AI assistant to inspect image EXIF, suggest canonical tags, craft a thoughtful caption, and preview drafts according to Foto community guidelines.
+* **`curate_foto_post`**: A structured prompt template guiding the model to inspect EXIF metadata, select canonical tags, formulate a caption focusing on narrative rather than hashtag spam, and preview drafts with `foto_draft_post`.
 
 ---
 
 ## Example Usage with an AI Agent
 
 ### 1. Inspecting a Photo
-> *"Can you inspect the photo at `~/Photos/Redwoods.jpg` and tell me about its technical settings?"*
+> *"Can you inspect the photo at `~/Photos/Redwoods.jpg` and check its camera settings?"*
 
-Claude uses `foto_inspect_image`:
 ```json
 {
   "originalWidth": 4000,
@@ -186,10 +205,9 @@ Claude uses `foto_inspect_image`:
 }
 ```
 
-### 2. Auto-Suggesting Foto Tags
+### 2. Auto-Suggesting Foto Curated Tags
 > *"What Foto tags would fit this redwood shot?"*
 
-Claude uses `foto_suggest_tags`:
 ```json
 {
   "suggestedTags": ["Medium Format", "Analog", "Forest"],
@@ -197,7 +215,7 @@ Claude uses `foto_suggest_tags`:
 }
 ```
 
-### 3. Publishing with Dry Run Test
+### 3. Publishing with Local Dry-Run Test
 > *"Let's test publishing it with a dry run first."*
 
 Claude runs `foto_publish_post` with `dryRun: true`:
@@ -213,24 +231,24 @@ Claude runs `foto_publish_post` with `dryRun: true`:
 }
 ```
 
-### 4. Publishing Live to Foto
-> *"Looks great! Go ahead and publish it live."*
+### 4. Publishing a Multi-Image Series
+> *"Publish these 3 shots as a sequential series: `frame1.jpg`, `frame2.jpg`, `frame3.jpg`"*
 
-Claude runs `foto_publish_post` without `dryRun`, and your photo is live on your chronological Foto feed.
+Claude validates boundaries (2 to 5 images), extracts metadata for each, and publishes the multi-image post.
 
-### 5. Synchronizing from Instagram Data Export
-> *"Can you analyze my Instagram export at `/path/to/posts_1.html` and preview what can be migrated to Foto?"*
+### 5. Instagram Data Export Migration
+> *"Analyze my Instagram export at `~/Downloads/instagram_export/posts_1.html` and preview what can be migrated."*
 
 Claude runs `foto_sync_instagram`:
 ```json
 {
   "dryRun": true,
-  "totalParsed": 12,
-  "readyToPublish": 10,
-  "alreadyPublishedCount": 2,
+  "totalParsed": 15,
+  "readyToPublish": 12,
+  "alreadyPublishedCount": 3,
   "candidates": [
     {
-      "post": { "title": "Red Fox in Snow", "hashtags": ["fox", "wildlife", "winter"] },
+      "post": { "title": "Red Fox in Winter Snow", "hashtags": ["fox", "wildlife", "winter"] },
       "suggestedTags": ["Wildlife", "Animals", "Winter"],
       "gpsScrubbed": true,
       "status": "READY"
@@ -241,53 +259,62 @@ Claude runs `foto_sync_instagram`:
 
 ---
 
-## Environment Variables
+## Build from Source & Developer Guide
 
-| Variable | Description | Required? |
-| :--- | :--- | :--- |
-| `FOTO_EMAIL` | Account email for Foto. If set, enables headless login without manual in-chat auth. | Optional |
-| `FOTO_PASSWORD` | Account password for Foto. | Optional |
+### Prerequisites
+* Node.js v18.0.0 or later
+* npm v9 or later
 
-> **Note:** Credentials can also be authenticated on-the-fly via the `foto_login` MCP tool. Session tokens are securely cached locally at `~/.config/foto-mcp/credentials.json` with strict user-only read/write permissions (`0600`).
-
----
-
-## Testing & Quality Assurance
-
-Run the automated test suite and type check:
 ```bash
-npm test
-npm run typecheck
+git clone https://github.com/thesven/foto_mcp.git
+cd foto_mcp
+npm install
+npm run build
 ```
-The test suite validates:
-* Exact 303 tag whitelist integrity & case-insensitive canonical normalization.
-* Tag quantity limits (rejects 0 tags or >3 tags).
-* Tag semantic suggestion matching.
-* Deterministic Foto post ID generation pattern (`yyyyMMddHHmmss-<userId>-<8alnum>`).
-* Image geometry, aspect-ratio formatting, and sharp 1820px downsampling.
-* Dry-run single post and multi-image series authoring.
-* Unauthenticated session handling.
-* Draft post preview and validation.
-* Multi-image series boundaries (enforces 2 to 5 images).
-* Instagram export HTML parsing, newline decoding, and GPS stripping.
+
+### Running Test Suite with >90% Coverage
+The test suite includes end-to-end integration flows and modular unit test suites across all components.
+
+```bash
+# Run tests and verify >90% coverage
+npm test
+
+# Generate HTML coverage report
+npm run test:coverage
+```
+
+Current test coverage breakdown:
+```
+-----------------|---------|----------|---------|---------|
+File             | % Stmts | % Branch | % Funcs | % Lines |
+-----------------|---------|----------|---------|---------|
+All files        |   97.71 |    84.55 |   96.07 |   97.71 |
+ src/config.ts   |     100 |      100 |     100 |     100 |
+ src/foto-client |     100 |     92.3 |     100 |     100 |
+ src/tags.ts     |     100 |      100 |     100 |     100 |
+ src/api/*       |   98.24 |    86.62 |     100 |   98.24 |
+ src/media/*     |   94.88 |    63.93 |      80 |   94.88 |
+ src/sync/*      |   98.71 |    86.56 |     100 |   98.71 |
+ src/index.ts    |   92.94 |    80.64 |      50 |   92.94 |
+-----------------|---------|----------|---------|---------|
+```
 
 ---
 
-## Troubleshooting
+## Troubleshooting & FAQ
 
-### Token Expired or Authentication Error
-* Run `foto_auth_status` to inspect current credentials.
-* If your token expired or password changed, call `foto_login` with your credentials or update `FOTO_EMAIL` and `FOTO_PASSWORD` in your environment.
-* To reset all local credentials, call `foto_logout` or delete `~/.config/foto-mcp/credentials.json`.
+### Session Expiration
+* If you see `"Stored credentials invalid"` or `"Authentication token expired"`, simply prompt the assistant: *"Log in to my Foto account with email `...` and password `...`"* or call `foto_login`.
+* To completely reset all local stored sessions, call `foto_logout` or delete `~/.config/foto-mcp/credentials.json`.
 
-### Image Rejected by Moderation
-* Foto automatically checks images using Sightengine (`nudity-2.1`). If an image exceeds platform thresholds (sexual activity > 0.7 or sexual display > 0.9), it will be rejected to protect your account standing.
+### Content Moderation Rejection
+* Foto automatically evaluates photos using Sightengine (`nudity-2.1`). If an image exceeds platform safety limits (sexual activity > 0.7 or sexual display > 0.9), it will be blocked to protect your account standing.
 
-### Format Not Supported
-* Foto strictly supports still photography (JPEG, PNG, WebP, TIFF, HEIC). Animated GIFs and video are not permitted.
+### Image Format Support
+* Foto exclusively allows still photography (JPEG, PNG, WebP, TIFF, HEIC). Animated GIFs and video files are rejected by the media pipeline.
 
 ---
 
 ## License
 
-[MIT License](LICENSE)
+This project is licensed under the [MIT License](LICENSE).

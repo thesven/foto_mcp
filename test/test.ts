@@ -1,3 +1,6 @@
+process.env.NODE_ENV = "test";
+process.env.FOTO_MCP_TEST = "true";
+
 import assert from "node:assert";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +12,16 @@ import { FotoClient } from "../src/foto-client.js";
 import { generateFotoPostId } from "../src/api/firestore.js";
 import { getAuthStatus } from "../src/api/auth.js";
 import { parseInstagramPostsHtml } from "../src/sync/instagram.js";
+
+import { runFirestoreTests } from "./unit/firestore.test.js";
+import { runAuthTests } from "./unit/auth.test.js";
+import { runStorageTests } from "./unit/storage.test.js";
+import { runModerationTests } from "./unit/moderation.test.js";
+import { runProcessorTests } from "./unit/processor.test.js";
+import { runTagTests } from "./unit/tags.test.js";
+import { runFotoClientTests } from "./unit/foto-client.test.js";
+import { runInstagramTests } from "./unit/instagram.test.js";
+import { runMcpServerTests } from "./unit/mcp-server.test.js";
 
 async function runTests() {
   console.log("=== Running Foto MCP Test Suite ===\n");
@@ -192,10 +205,10 @@ async function runTests() {
     <div class="uiBoxWhite">
       <h2>Mallard Drake on the Grand River&#039;s edge.&#10;&#10;📷 300mm · f/2.8 · 1/1000s&#10;&#10;#bird #wildlife #nature #canon</h2>
       <img src="media/posts/202611/duck.jpg" />
-      <div class="_a6-o">Nov 9, 2026 8:00am</div>
       <div>Latitude</div><div><div class="_a6-q">43.4516</div></div>
       <div>Longitude</div><div><div class="_a6-q">-80.4925</div></div>
-    </div></div>
+      <div class="_3-94 _a6-o">Nov 9, 2026 8:00am</div></div>
+    </div>
   `;
   const parsedInstagram = parseInstagramPostsHtml(mockInstagramHtml);
   assert.strictEqual(parsedInstagram.length, 1);
@@ -209,6 +222,18 @@ async function runTests() {
 
   // Clean up test files
   await fs.rm(tempDir, { recursive: true, force: true });
+
+  console.log("\n=== Running Modular Unit Test Suites ===");
+  await runFirestoreTests();
+  await runAuthTests();
+  await runStorageTests();
+  await runModerationTests();
+  await runProcessorTests();
+  await runTagTests();
+  await runFotoClientTests();
+  await runInstagramTests();
+  await runMcpServerTests();
+
   console.log("\n=== All Tests Passed Successfully! ===");
 }
 
