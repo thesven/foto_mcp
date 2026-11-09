@@ -65,7 +65,7 @@ flowchart TD
 You can run `foto_mcp` directly without cloning or building locally:
 
 ```bash
-npx -y github:thesven/foto_mcp#v1.2.0
+npx -y github:thesven/foto_mcp#main
 ```
 
 ---
@@ -83,7 +83,7 @@ Add this to your Claude Desktop configuration file:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"],
+      "args": ["-y", "github:thesven/foto_mcp#main"],
       "env": {
         "FOTO_EMAIL": "your_email@example.com",
         "FOTO_PASSWORD": "your_password"
@@ -100,7 +100,7 @@ Add to `.cursor/mcp.json` or your Global Cursor MCP settings:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
+      "args": ["-y", "github:thesven/foto_mcp#main"]
     }
   }
 }
@@ -114,7 +114,7 @@ Add to `~/.config/zed/settings.json`:
     "servers": {
       "foto": {
         "command": "npx",
-        "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
+        "args": ["-y", "github:thesven/foto_mcp#main"]
       }
     }
   }
@@ -128,7 +128,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
   "mcpServers": {
     "foto": {
       "command": "npx",
-      "args": ["-y", "github:thesven/foto_mcp#v1.2.0"]
+      "args": ["-y", "github:thesven/foto_mcp#main"]
     }
   }
 }
@@ -158,23 +158,25 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (25 Tools)
+## Complete MCP Tool Suite (27 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
 | `foto_auth_status` | Inspects active session, local token validity, and remaining minutes. | *None* |
 | `foto_login` | In-chat authentication via email and password; caches tokens locally. | `email` (string), `password` (string) |
 | `foto_logout` | Clears local cached session tokens and in-memory credentials. | *None* |
-| `foto_inspect_image` | Inspects local image: returns dimensions, photographic aspect ratio (e.g. 3:2, 6:7), GPS status, and camera/lens EXIF. | `filePath` (string) |
-| `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, or keywords. | `caption?` (string), `cameraInfo?` (string), `keywords?` (string[]) |
+| `foto_inspect_image` | Inspects local image: returns dimensions, aspect ratio, color space, GPS status, camera EXIF, and base64 preview thumbnail for multimodal inspection. | `filePath` (string), `includePreview?` (boolean, default: true) |
+| `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, film stock, or Fuji film simulations. | `caption?` (string), `cameraInfo?` (string), `keywords?` (string[]) |
 | `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query` (string), `limit?` (number, default: 20) |
 | `foto_browse_tag` | Browse recent public posts under any of Foto's 303 curated tags with shard and pagination support. | `tag` (string), `limit?` (number, default: 20), `shard?` (number) |
 | `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`, `Street`). Returns bios, stats, profile links, and sample works. | `tag` (string), `limit?` (number, default: 10) |
 | `foto_follow_user` | Follows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms (`appendMissingElements`). | `userId?` (string), `userIds?` (string[]) |
 | `foto_unfollow_user` | Unfollows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms (`removeAllFromArray`). | `userId?` (string), `userIds?` (string[]) |
 | `foto_draft_post` | Validates a post draft before publishing: checks tag whitelist, calculates downsampled dimensions, and reviews EXIF summary. | `filePath` (string), `caption` (string), `tags` (string[]) |
-| `foto_publish_post` | Normalizes image (1820px), scrubs GPS, uploads to Storage, passes Sightengine moderation, and creates public Firestore post. | `filePath` (string), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
+| `foto_publish_post` | Normalizes image (1820px, sRGB), scrubs GPS, uploads to Storage, passes Sightengine moderation, and creates public Firestore post. | `filePath` (string), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
 | `foto_publish_series` | Publishes a multi-image sequential Series (2 to 5 photos) under one post. | `filePaths` (string[], min: 2, max: 5), `caption` (string), `tags` (string[]), `dryRun?` (boolean) |
+| `foto_create_portfolio` | Creates and publishes a curated multi-image Portfolio showcase with custom cover image, alignment, and artist statement. | `title` (string), `images` (array, min: 2), `tags` (string[]), `description?` (string), `coverIndex?` (number), `coverAlignmentX?` (number), `dryRun?` (boolean) |
+| `foto_list_portfolios` | Lists portfolio collections for any photographer by user ID or username. | `userId?` (string), `username?` (string), `limit?` (number, default: 20) |
 | `foto_delete_post` | Deletes a published post by post ID. Automatically cleans up post documents, private metadata, and updates profile post lists. | `postId` (string) |
 | `foto_update_post` | Updates an existing post's caption or curated tags (must be 1 to 3 items from the 303 whitelist). | `postId` (string), `caption?` (string), `tags?` (string[]) |
 | `foto_get_post` | Retrieves full post document by post ID, resolving camera EXIF metadata, image URLs, and dimensions. | `postId` (string) |

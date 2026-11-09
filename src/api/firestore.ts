@@ -1177,3 +1177,139 @@ export async function fetchHomeFeed(params: {
     postUrl: `https://the.fotoapp.co/app/profile?userId=${doc.userId}`
   }));
 }
+
+export interface PortfolioImageRecord {
+  id: string;
+  imageUrl: string;
+  imagePath: string;
+  aspectRatio: number;
+  fullWidth: number;
+  fullHeight: number;
+  caption?: string;
+  tags?: string[];
+  order: number;
+  privateMetadataId: string;
+  nudityRating?: number;
+}
+
+/**
+ * Writes a multi-image portfolio document to `posts/<postId>` matching Foto portfolio schema
+ */
+export async function savePortfolioDocument(params: {
+  postId: string;
+  userId: string;
+  title: string;
+  description?: string;
+  tags: string[];
+  coverImageId: string;
+  coverAlignmentX?: number;
+  coverImageUrl: string;
+  coverImagePath: string;
+  coverImageWidth: number;
+  coverImageHeight: number;
+  images: PortfolioImageRecord[];
+  nudityRating: number;
+  idToken: string;
+}): Promise<void> {
+  const {
+    postId,
+    userId,
+    title,
+    description = "",
+    tags,
+    coverImageId,
+    coverAlignmentX = 0.5,
+    coverImageUrl,
+    coverImagePath,
+    coverImageWidth,
+    coverImageHeight,
+    images,
+    nudityRating,
+    idToken
+  } = params;
+
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const docPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${postId}`;
+
+  const fields: Record<string, any> = {
+    userId: toFirestoreValue(userId),
+    postId: toFirestoreValue(postId),
+    type: toFirestoreValue("portfolio"),
+    title: toFirestoreValue(title),
+    coverImageId: toFirestoreValue(coverImageId),
+    coverAlignmentX: { doubleValue: coverAlignmentX },
+    imageUrl: toFirestoreValue(coverImageUrl),
+    imagePath: toFirestoreValue(coverImagePath),
+    imageWidth: { doubleValue: coverImageWidth },
+    imageHeight: { doubleValue: coverImageHeight },
+    description: toFirestoreValue(description),
+    tags: toFirestoreValue(tags),
+    likes: toFirestoreValue([]),
+    commentCount: { integerValue: "0" },
+    nudityRating: { doubleValue: nudityRating },
+    violenceRating: { doubleValue: 0.0 },
+    privateMetadataId: toFirestoreValue(images[0]?.privateMetadataId || coverImageId),
+    images: toFirestoreValue(images),
+    isActive: toFirestoreValue(true),
+    inactiveReason: { nullValue: null },
+    inactiveSince: { nullValue: null }
+  };
+
+  const response = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: docPath,
+            fields
+          },
+          updateTransforms: [
+            {
+              fieldPath: "timeStamp",
+              setToServerValue: "REQUEST_TIME"
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const err = (await response.json()) as any;
+    throw new Error(`Failed to save portfolio document: ${err.error?.message || response.statusText}`);
+  }
+}
+
+/**
+ * Fetches portfolio posts for a user
+ */
+export async function fetchUserPortfolios(params: {
+  userId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<Array<Record<string, any>>> {
+  const userProfile = await getFirestoreDocument({
+    collectionPath: "user-profiles",
+    documentId: params.userId,
+    idToken: params.idToken
+  });
+
+  if (!userProfile || !Array.isArray(userProfile.postIds) || userProfile.postIds.length === 0) {
+    return [];
+  }
+
+  const posts = await fetchPostsDocuments({
+    postIds: userProfile.postIds,
+    idToken: params.idToken
+  });
+
+  const portfolios = posts.filter(p => p.type === "portfolio");
+  const max = params.limit || 20;
+  return portfolios.slice(0, max);
+}
+

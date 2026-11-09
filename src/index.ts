@@ -11,7 +11,7 @@ const client = new FotoClient();
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "1.4.0"
+  version: "1.5.0"
 });
 
 // Tool 1: foto_auth_status
@@ -95,21 +95,33 @@ server.tool(
 // Tool 4: foto_inspect_image
 server.tool(
   "foto_inspect_image",
-  "Inspect a local image file without uploading: extracts technical EXIF (camera, lens, ISO, shutter, aperture), dimensions, aspect ratio, and checks for GPS presence.",
+  "Inspect a local image file without uploading: extracts technical EXIF (camera, lens, ISO, shutter, aperture), dimensions, aspect ratio, color space, and checks for GPS presence. Includes base64 preview image thumbnail for visual multimodal inspection.",
   {
-    filePath: z.string().describe("Absolute file path to the local image (JPEG, PNG, WebP, HEIC, TIFF)")
+    filePath: z.string().describe("Absolute file path to the local image (JPEG, PNG, WebP, HEIC, TIFF)"),
+    includePreview: z.boolean().optional().describe("Whether to include base64 visual thumbnail image content (default: true)")
   },
-  async ({ filePath }) => {
+  async ({ filePath, includePreview = true }) => {
     try {
-      const inspection = await client.inspectPhoto(filePath);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(inspection, null, 2)
-          }
-        ]
-      };
+      const inspection = await client.inspectPhoto(filePath, { preview: includePreview });
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      > = [
+        {
+          type: "text",
+          text: JSON.stringify(inspection, null, 2)
+        }
+      ];
+
+      if (includePreview && inspection.previewBase64) {
+        content.push({
+          type: "image",
+          data: inspection.previewBase64,
+          mimeType: "image/jpeg"
+        });
+      }
+
+      return { content };
     } catch (err: any) {
       return {
         isError: true,
@@ -705,6 +717,72 @@ server.tool(
       return {
         isError: true,
         content: [{ type: "text", text: `Failed to fetch home feed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 25: foto_create_portfolio
+server.tool(
+  "foto_create_portfolio",
+  "Create and publish a multi-image curated portfolio showcase to Foto. Includes title, custom cover image selection, alignment, and 1-3 curated tags. Supports dryRun=true.",
+  {
+    title: z.string().describe("Title of the portfolio collection (e.g. 'Nordic Nocturnes', 'Tokyo Rain')"),
+    images: z.array(
+      z.object({
+        filePath: z.string().describe("Absolute file path to local image"),
+        caption: z.string().optional().describe("Optional caption for this specific photo in the portfolio"),
+        tags: z.array(z.string()).optional().describe("Optional tags for this specific photo")
+      })
+    ).min(2).describe("Ordered array of at least 2 images for the portfolio"),
+    tags: z.array(z.string()).min(1).max(3).describe("1 to 3 tags chosen from Foto's official curated whitelist"),
+    description: z.string().optional().describe("Optional narrative artist statement or description of the collection"),
+    coverIndex: z.number().int().min(0).optional().describe("0-based index of the image to use as the cover (default: 0)"),
+    coverAlignmentX: z.number().min(0).max(1).optional().describe("Cover thumbnail horizontal alignment (0.0=left, 0.5=center, 1.0=right; default: 0.5)"),
+    dryRun: z.boolean().optional().describe("If true, validates and prepares all images without uploading or mutating remote databases")
+  },
+  async ({ title, images, tags, description, coverIndex = 0, coverAlignmentX = 0.5, dryRun = false }) => {
+    try {
+      const result = await client.createPortfolio({
+        title,
+        images,
+        tags,
+        description,
+        coverIndex,
+        coverAlignmentX,
+        dryRun
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to create portfolio: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 26: foto_list_portfolios
+server.tool(
+  "foto_list_portfolios",
+  "List portfolio showcase collections for a specific user or the currently authenticated user.",
+  {
+    userId: z.string().optional().describe("Target user ID (defaults to authenticated user)"),
+    username: z.string().optional().describe("Target photographer username (e.g. '@alex' or 'alex')"),
+    limit: z.number().int().positive().optional().describe("Maximum number of portfolios to return (default: 20)")
+  },
+  async ({ userId, username, limit = 20 }) => {
+    try {
+      const portfolios = await client.listPortfolios({ userId, username, limit });
+      return {
+        content: [{ type: "text", text: JSON.stringify({ count: portfolios.length, portfolios }, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to list portfolios: ${err.message}` }]
       };
     }
   }

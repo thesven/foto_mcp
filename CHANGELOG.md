@@ -5,6 +5,26 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-09
+
+### Added
+- **Curated Portfolios Engine (27 Total MCP Tools)**:
+  - `foto_create_portfolio`: Create and publish multi-image portfolio showcase collections with custom titles, cover image selection, alignment controls, and curated tag metadata. Supports `dryRun=true`.
+  - `foto_list_portfolios`: Query and browse portfolio collections for any photographer or the authenticated user.
+  - Firestore schema support for `type: "portfolio"`, `coverImageId`, `coverAlignmentX`, and `images` slide arrays with individual EXIF and captions.
+- **Multimodal Visual Inspection (`ImageContent`)**:
+  - `foto_inspect_image` now generates and returns a color-corrected sRGB base64 thumbnail (`type: "image"`, `mimeType: "image/jpeg"`) alongside technical JSON metadata, allowing LLMs and MCP clients to visually preview photos before publishing.
+  - Exported `generateImagePreview` helper in media processor.
+- **sRGB Color Normalization & ICC Handling**:
+  - Enhanced Sharp pipeline in `prepareImageForUpload` with `.toColorspace("srgb")` to eliminate washed-out color shifts on wide-gamut (Adobe RGB / ProPhoto RGB / Display P3) photos across web and mobile screens.
+  - Added `colorSpace` and `hasIccProfile` detection to image inspections.
+- **Film Simulation & Analog Film Stock Detection**:
+  - Expanded `suggestTags` to recognize Fujifilm film simulations (`Classic Chrome`, `Classic Neg`, `Velvia`, `Acros`, `Provia`, `Astia`, `Eterna`, `Nostalgic Neg`) and analog film stocks (`Portra`, `Tri-X`, `HP5`, `CineStill`, `Ektar`, `Delta`, `T-Max`, `Gold 200`).
+  - Automatically maps detected simulations and stocks to official Foto tags (`Analog`, `Black and White`, `35mm`, `Medium Format`, `Color`, `Film`).
+- **CI & Node Compatibility**:
+  - Resolved Node 18 CommonJS ESM loader issue with `c8` by updating dev dependency to CommonJS-compatible `c8@10.1.3`.
+  - Expanded GitHub Actions CI matrix to test Node 18, 20, 22, and 24 with `fail-fast: false`.
+
 ## [1.4.0] - 2026-11-09
 
 ### Added

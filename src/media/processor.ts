@@ -19,7 +19,17 @@ export interface ImageInspection {
     height: number;
   };
   supportedFormat: boolean;
+  colorSpace?: string;
+  hasIccProfile?: boolean;
+  previewBase64?: string;
   warning?: string;
+}
+
+export interface ImagePreview {
+  base64: string;
+  mimeType: string;
+  width: number;
+  height: number;
 }
 
 export interface PreparedImage {
@@ -76,9 +86,41 @@ function formatExposureTime(exposureTime?: number): string | undefined {
 }
 
 /**
+ * Generates a lightweight, color-corrected sRGB JPEG preview encoded as base64
+ * for multimodal display in MCP tool responses.
+ */
+export async function generateImagePreview(
+  filePathOrBuffer: string | Buffer,
+  maxDimension = 360
+): Promise<ImagePreview> {
+  const thumbBuffer = await sharp(filePathOrBuffer)
+    .rotate()
+    .toColorspace("srgb")
+    .resize({
+      width: maxDimension,
+      height: maxDimension,
+      fit: "inside",
+      withoutEnlargement: true
+    })
+    .jpeg({ quality: 75 })
+    .toBuffer();
+
+  const meta = await sharp(thumbBuffer).metadata();
+  return {
+    base64: thumbBuffer.toString("base64"),
+    mimeType: "image/jpeg",
+    width: meta.width || maxDimension,
+    height: meta.height || maxDimension
+  };
+}
+
+/**
  * Inspects a local image file and parses technical EXIF and geometry without modifying it.
  */
-export async function inspectImage(filePath: string): Promise<ImageInspection> {
+export async function inspectImage(
+  filePath: string,
+  options?: { preview?: boolean }
+): Promise<ImageInspection> {
   const fileStat = await fs.stat(filePath);
   const metadata = await sharp(filePath).metadata();
 
@@ -149,6 +191,16 @@ export async function inspectImage(filePath: string): Promise<ImageInspection> {
     }
   }
 
+  let previewBase64: string | undefined;
+  if (isSupported && options?.preview !== false) {
+    try {
+      const preview = await generateImagePreview(filePath, 360);
+      previewBase64 = preview.base64;
+    } catch {
+      // Non-fatal if preview generation fails
+    }
+  }
+
   return {
     filePath,
     format,
@@ -165,6 +217,9 @@ export async function inspectImage(filePath: string): Promise<ImageInspection> {
       height: targetHeight
     },
     supportedFormat: isSupported,
+    colorSpace: metadata.space,
+    hasIccProfile: Boolean(metadata.icc),
+    previewBase64,
     warning
   };
 }
@@ -175,9 +230,10 @@ export async function inspectImage(filePath: string): Promise<ImageInspection> {
  * 2. Compresses to JPEG 80%.
  * 3. Scrubs GPS and thumbnail metadata from binary for privacy.
  * 4. Extracts sanitized camera EXIF map for image-private-metadata Firestore storage.
+ * 5. Converts to standard sRGB color space to preserve color fidelity on all devices.
  */
 export async function prepareImageForUpload(filePath: string): Promise<PreparedImage> {
-  const inspection = await inspectImage(filePath);
+  const inspection = await inspectImage(filePath, { preview: false });
 
   if (!inspection.supportedFormat) {
     throw new Error(inspection.warning || `Unsupported file format: ${inspection.format}`);
@@ -185,9 +241,10 @@ export async function prepareImageForUpload(filePath: string): Promise<PreparedI
 
   const { width: targetWidth, height: targetHeight } = inspection.targetUploadDimensions;
 
-  // Sharp processing: resize + strip GPS metadata by not preserving GPS tags, encode as JPEG 80%
+  // Sharp processing: resize, convert to sRGB, strip GPS metadata, encode as JPEG 80%
   const processedBuffer = await sharp(filePath)
     .rotate() // Automatically orient based on EXIF orientation
+    .toColorspace("srgb") // Normalize to standard sRGB colorspace
     .resize({
       width: targetWidth,
       height: targetHeight,

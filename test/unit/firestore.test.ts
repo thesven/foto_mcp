@@ -27,7 +27,9 @@ import {
   fetchPostComments,
   addPostComment,
   fetchUserNotifications,
-  fetchHomeFeed
+  fetchHomeFeed,
+  savePortfolioDocument,
+  fetchUserPortfolios
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -547,6 +549,82 @@ export async function runFirestoreTests() {
     globalThis.fetch = async () => new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [] } } } }), { status: 200 });
     const emptyFeed = await fetchHomeFeed({ userId: "u_lonely", idToken: "tok" });
     assert.strictEqual(emptyFeed.length, 0);
+
+    // savePortfolioDocument - success
+    globalThis.fetch = async () => new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    await savePortfolioDocument({
+      postId: "port_1",
+      userId: "u1",
+      title: "Arctic Horizons",
+      description: "A series from the far north",
+      tags: ["Landscape", "Travel"],
+      coverImageId: "img_cover",
+      coverAlignmentX: 0.5,
+      coverImageUrl: "https://img.jpg/cover",
+      coverImagePath: "portfolios/u1/cover",
+      coverImageWidth: 1820,
+      coverImageHeight: 1200,
+      images: [
+        {
+          id: "img_cover",
+          imageUrl: "https://img.jpg/cover",
+          imagePath: "portfolios/u1/cover",
+          aspectRatio: 1.5,
+          fullWidth: 1820,
+          fullHeight: 1200,
+          caption: "Glacier vista",
+          order: 1,
+          privateMetadataId: "meta_1"
+        }
+      ],
+      nudityRating: 0.0,
+      idToken: "token123"
+    });
+
+    // savePortfolioDocument - error
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "Permission denied" } }), { status: 403 });
+    await assert.rejects(
+      async () => {
+        await savePortfolioDocument({
+          postId: "port_err",
+          userId: "u1",
+          title: "Fail",
+          tags: ["Landscape"],
+          coverImageId: "img1",
+          coverImageUrl: "https://img.jpg",
+          coverImagePath: "p/u1/img1",
+          coverImageWidth: 100,
+          coverImageHeight: 100,
+          images: [],
+          nudityRating: 0.0,
+          idToken: "token123"
+        });
+      },
+      /Permission denied/
+    );
+
+    // fetchUserPortfolios
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_port")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "p_std" }, { stringValue: "p_port" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_std")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_std" }, type: { stringValue: "post" } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_port")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_port" }, type: { stringValue: "portfolio" }, title: { stringValue: "My Portfolio" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const userPorts = await fetchUserPortfolios({ userId: "u_port", idToken: "tok" });
+    assert.strictEqual(userPorts.length, 1);
+    assert.strictEqual(userPorts[0].postId, "p_port");
+
+    // fetchUserPortfolios - empty user
+    globalThis.fetch = async () => new Response("", { status: 404 });
+    const emptyPorts = await fetchUserPortfolios({ userId: "nonexistent", idToken: "tok" });
+    assert.strictEqual(emptyPorts.length, 0);
 
   } finally {
     globalThis.fetch = originalFetch;

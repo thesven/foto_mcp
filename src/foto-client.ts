@@ -26,7 +26,10 @@ import {
   fetchPostComments,
   addPostComment,
   fetchUserNotifications,
-  fetchHomeFeed
+  fetchHomeFeed,
+  savePortfolioDocument,
+  fetchUserPortfolios,
+  PortfolioImageRecord
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
 
@@ -136,20 +139,21 @@ export class FotoClient {
   /**
    * Inspects a local image file without modifying or uploading it
    */
-  async inspectPhoto(filePath: string): Promise<ImageInspection> {
-    return await inspectImage(filePath);
+  async inspectPhoto(filePath: string, options?: { preview?: boolean }): Promise<ImageInspection> {
+    return await inspectImage(filePath, options);
   }
 
   /**
-   * Previews a post draft with tag validation and EXIF summary
+   * Previews a post draft with tag validation, color analysis, preview generation and EXIF summary
    */
   async draftPost(params: {
     filePath: string;
     caption: string;
     tags: string[];
+    includePreview?: boolean;
   }) {
     const tagValidation = validateTags(params.tags);
-    const inspection = await inspectImage(params.filePath);
+    const inspection = await inspectImage(params.filePath, { preview: params.includePreview !== false });
 
     return {
       filePath: params.filePath,
@@ -164,6 +168,9 @@ export class FotoClient {
         uploadTargetHeight: inspection.targetUploadDimensions.height
       },
       hasGps: inspection.hasGps,
+      colorSpace: inspection.colorSpace,
+      hasIccProfile: inspection.hasIccProfile,
+      previewBase64: inspection.previewBase64,
       exifSummary: inspection.exif,
       readyToPublish: tagValidation.valid && inspection.supportedFormat,
       warnings: [
@@ -971,5 +978,235 @@ export class FotoClient {
       limit
     });
   }
+
+  /**
+   * Creates and publishes a multi-image curated portfolio showcase to Foto
+   */
+  async createPortfolio(params: {
+    title: string;
+    images: Array<{
+      filePath: string;
+      caption?: string;
+      tags?: string[];
+    }>;
+    tags: string[];
+    description?: string;
+    coverIndex?: number;
+    coverAlignmentX?: number;
+    dryRun?: boolean;
+  }): Promise<{
+    success: boolean;
+    dryRun: boolean;
+    postId?: string;
+    postUrl?: string;
+    title: string;
+    coverImageUrl?: string;
+    imageCount: number;
+    tags: string[];
+    images: Array<{
+      id: string;
+      imageUrl?: string;
+      filePath?: string;
+      width: number;
+      height: number;
+      aspectRatio: number;
+      caption?: string;
+    }>;
+    message: string;
+  }> {
+    const { title, images, tags, description, coverIndex = 0, coverAlignmentX = 0.5, dryRun = false } = params;
+
+    if (!title || typeof title !== "string" || !title.trim()) {
+      throw new Error("Portfolio title is required and cannot be empty.");
+    }
+
+    if (!Array.isArray(images) || images.length < 2) {
+      throw new Error("A portfolio must contain at least 2 images.");
+    }
+
+    const tagValidation = validateTags(tags);
+    if (!tagValidation.valid) {
+      throw new Error(tagValidation.error);
+    }
+    if (tagValidation.canonicalTags.length < 1 || tagValidation.canonicalTags.length > 3) {
+      throw new Error("Portfolio must have between 1 and 3 tags selected from the curated list.");
+    }
+
+    const coverIdx = Math.min(Math.max(coverIndex, 0), images.length - 1);
+    const coverAlignX = Math.min(Math.max(coverAlignmentX, 0), 1);
+
+    // Prepare and inspect each image locally
+    const preparedList: Array<{
+      prep: PreparedImage;
+      original: { filePath: string; caption?: string; tags?: string[] };
+    }> = [];
+
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      if (!img.filePath) {
+        throw new Error(`Image at index ${i} is missing filePath.`);
+      }
+      const prep = await prepareImageForUpload(img.filePath);
+      preparedList.push({ prep, original: img });
+    }
+
+    if (dryRun) {
+      return {
+        success: true,
+        dryRun: true,
+        title: title.trim(),
+        imageCount: preparedList.length,
+        tags: tagValidation.canonicalTags,
+        images: preparedList.map((item, idx) => ({
+          id: `dryrun_img_${idx + 1}`,
+          filePath: item.original.filePath,
+          width: item.prep.width,
+          height: item.prep.height,
+          aspectRatio: item.prep.aspectRatio,
+          caption: item.original.caption
+        })),
+        message: `[Dry Run] Successfully validated portfolio "${title.trim()}" with ${preparedList.length} images and tags [${tagValidation.canonicalTags.join(", ")}]. No uploads performed.`
+      };
+    }
+
+    const authSession = await getValidAuthSession();
+    const userId = authSession.userId;
+    const idToken = authSession.idToken;
+    const postId = generateFotoPostId(userId);
+
+    const portfolioImages: PortfolioImageRecord[] = [];
+    let maxNudityRating = 0;
+
+    for (let i = 0; i < preparedList.length; i++) {
+      const item = preparedList[i];
+      const storageResult = await uploadImageToFotoStorage({
+        buffer: item.prep.buffer,
+        userId,
+        idToken,
+        folder: "portfolios"
+      });
+
+      const moderation = await checkContentModeration(storageResult.imageUrl);
+      if (!moderation.passed) {
+        throw new Error(
+          `Portfolio image #${i + 1} rejected by content moderation: ${moderation.failureReason}`
+        );
+      }
+      if (moderation.nudityRating > maxNudityRating) {
+        maxNudityRating = moderation.nudityRating;
+      }
+
+      const privateMetadataId = crypto.randomUUID();
+      await savePrivateMetadata({
+        privateMetadataId,
+        userId,
+        imagePath: storageResult.imagePath,
+        imageUrl: storageResult.imageUrl,
+        publicDocPath: `posts/${postId}`,
+        exif: item.prep.exif,
+        portfolioImageId: storageResult.imageId,
+        idToken
+      });
+
+      portfolioImages.push({
+        id: storageResult.imageId,
+        imageUrl: storageResult.imageUrl,
+        imagePath: storageResult.imagePath,
+        aspectRatio: item.prep.aspectRatio,
+        fullWidth: item.prep.width,
+        fullHeight: item.prep.height,
+        caption: item.original.caption || "",
+        tags: item.original.tags || [],
+        order: i + 1,
+        privateMetadataId,
+        nudityRating: moderation.nudityRating
+      });
+    }
+
+    const coverImage = portfolioImages[coverIdx];
+
+    await savePortfolioDocument({
+      postId,
+      userId,
+      title: title.trim(),
+      description: description?.trim() || "",
+      tags: tagValidation.canonicalTags,
+      coverImageId: coverImage.id,
+      coverAlignmentX: coverAlignX,
+      coverImageUrl: coverImage.imageUrl,
+      coverImagePath: coverImage.imagePath,
+      coverImageWidth: coverImage.fullWidth,
+      coverImageHeight: coverImage.fullHeight,
+      images: portfolioImages,
+      nudityRating: maxNudityRating,
+      idToken
+    });
+
+    await appendPostToUserProfile({
+      userId,
+      postId,
+      idToken
+    });
+
+    await indexPostTags({
+      postId,
+      tags: tagValidation.canonicalTags,
+      idToken
+    });
+
+    return {
+      success: true,
+      dryRun: false,
+      postId,
+      postUrl: `https://the.fotoapp.co/app/profile?userId=${userId}`,
+      title: title.trim(),
+      coverImageUrl: coverImage.imageUrl,
+      imageCount: portfolioImages.length,
+      tags: tagValidation.canonicalTags,
+      images: portfolioImages.map(img => ({
+        id: img.id,
+        imageUrl: img.imageUrl,
+        width: img.fullWidth,
+        height: img.fullHeight,
+        aspectRatio: img.aspectRatio,
+        caption: img.caption
+      })),
+      message: `Successfully published portfolio "${title.trim()}" with ${portfolioImages.length} images to Foto! Post ID: ${postId}`
+    };
+  }
+
+  /**
+   * Lists portfolio collections for a specified user or the authenticated user
+   */
+  async listPortfolios(params?: {
+    userId?: string;
+    username?: string;
+    limit?: number;
+  }): Promise<Array<Record<string, any>>> {
+    const authSession = await getValidAuthSession();
+    let targetUserId = params?.userId;
+
+    if (!targetUserId && params?.username) {
+      const resolvedUserId = await resolveUserByUsername({
+        username: params.username,
+        idToken: authSession.idToken
+      });
+      if (!resolvedUserId) {
+        throw new Error(`Photographer with username "${params.username}" not found.`);
+      }
+      targetUserId = resolvedUserId;
+    }
+
+    if (!targetUserId) {
+      targetUserId = authSession.userId;
+    }
+
+    return await fetchUserPortfolios({
+      userId: targetUserId,
+      idToken: authSession.idToken,
+      limit: params?.limit
+    });
+  }
 }
+
 

@@ -69,6 +69,11 @@ export async function runMcpServerTests() {
     const inspectRes = await tools.foto_inspect_image.handler({ filePath: testImg }, {} as any);
     assert(!inspectRes.isError);
     assert(inspectRes.content[0].text.includes("originalWidth"));
+    assert(inspectRes.content.some((c: any) => c.type === "image"));
+
+    const inspectNoPrev = await tools.foto_inspect_image.handler({ filePath: testImg, includePreview: false }, {} as any);
+    assert(!inspectNoPrev.isError);
+    assert(!inspectNoPrev.content.some((c: any) => c.type === "image"));
 
     const inspectFail = await tools.foto_inspect_image.handler({ filePath: "/non/existent/path.jpg" }, {} as any);
     assert.strictEqual(inspectFail.isError, true);
@@ -380,6 +385,45 @@ export async function runMcpServerTests() {
     assert(seriesPrompt, "curate_photo_series prompt must be registered");
     const seriesRes = await seriesPrompt.callback({}, {} as any);
     assert(seriesRes.messages[0].content.text.includes("Pacing & Flow"));
+
+    // 28. Tool: foto_create_portfolio (dryRun and error)
+    const createPortDry = await tools.foto_create_portfolio.handler(
+      {
+        title: "Test Portfolio",
+        images: [{ filePath: testImg }, { filePath: testImg }],
+        tags: ["Landscape"],
+        dryRun: true
+      },
+      {} as any
+    );
+    assert(!createPortDry.isError);
+    assert(createPortDry.content[0].text.includes("Test Portfolio"));
+
+    const createPortFail = await tools.foto_create_portfolio.handler(
+      {
+        title: "Fail",
+        images: [{ filePath: testImg }],
+        tags: ["InvalidTag"],
+        dryRun: true
+      },
+      {} as any
+    );
+    assert.strictEqual(createPortFail.isError, true);
+
+    // 29. Tool: foto_list_portfolios (success and error)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_port_mcp")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "p_port_mcp" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_port_mcp")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_port_mcp" }, type: { stringValue: "portfolio" }, title: { stringValue: "MCP Portfolio" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const listPortRes = await tools.foto_list_portfolios.handler({ userId: "u_port_mcp" }, {} as any);
+    assert(!listPortRes.isError);
+    assert(listPortRes.content[0].text.includes("MCP Portfolio"));
 
   } finally {
     globalThis.fetch = originalFetch;

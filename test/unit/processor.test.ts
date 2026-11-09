@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import sharp from "sharp";
-import { inspectImage, prepareImageForUpload } from "../../src/media/processor.js";
+import { inspectImage, prepareImageForUpload, generateImagePreview } from "../../src/media/processor.js";
 
 export async function runProcessorTests() {
   console.log("--- Testing Media Processor module ---");
@@ -112,6 +112,18 @@ export async function runProcessorTests() {
     assert(prepared.buffer.length > 0);
     assert.strictEqual(typeof prepared.hasStrippedGps, "boolean");
 
+    // 4. Multimodal Preview & color space tests
+    const preview = await generateImagePreview(portraitPath, 200);
+    assert(typeof preview.base64 === "string" && preview.base64.length > 0);
+    assert.strictEqual(preview.mimeType, "image/jpeg");
+    assert(preview.width <= 200 && preview.height <= 200);
+
+    const inspWithPreview = await inspectImage(squarePath, { preview: true });
+    assert(typeof inspWithPreview.previewBase64 === "string");
+    assert(typeof inspWithPreview.colorSpace === "string");
+
+    const inspNoPreview = await inspectImage(squarePath, { preview: false });
+    assert.strictEqual(inspNoPreview.previewBase64, undefined);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

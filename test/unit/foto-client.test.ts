@@ -474,6 +474,97 @@ export async function runFotoClientTests() {
     assert.strictEqual(feed.length, 1);
     assert.strictEqual(feed[0].postId, "p_feed_1");
 
+    // createPortfolio - validations
+    await assert.rejects(async () => {
+      await client.createPortfolio({ title: "", images: [{ filePath: img1 }], tags: ["Landscape"] });
+    }, /Portfolio title is required/);
+
+    await assert.rejects(async () => {
+      await client.createPortfolio({ title: "My Portfolio", images: [{ filePath: img1 }], tags: ["Landscape"] });
+    }, /must contain at least 2 images/);
+
+    await assert.rejects(async () => {
+      await client.createPortfolio({ title: "My Portfolio", images: [{ filePath: img1 }, { filePath: img1 }], tags: ["InvalidTagXYZ"] });
+    }, /Invalid tags/);
+
+    await assert.rejects(async () => {
+      await client.createPortfolio({ title: "My Portfolio", images: [{ filePath: "" }, { filePath: img1 }], tags: ["Landscape"] });
+    }, /missing filePath/);
+
+    // createPortfolio - dryRun
+    const dryPortfolio = await client.createPortfolio({
+      title: "Alpine Visions",
+      images: [
+        { filePath: img1, caption: "Peak 1" },
+        { filePath: img1, caption: "Peak 2" }
+      ],
+      tags: ["Landscape", "Travel"],
+      dryRun: true
+    });
+    assert.strictEqual(dryPortfolio.dryRun, true);
+    assert.strictEqual(dryPortfolio.title, "Alpine Visions");
+    assert.strictEqual(dryPortfolio.imageCount, 2);
+
+    // createPortfolio - live flow
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("firebasestorage")) {
+        return new Response(JSON.stringify({ downloadTokens: "token_abc" }), { status: 200 });
+      }
+      if (urlStr.includes("api.sightengine.com")) {
+        return new Response(JSON.stringify({ status: "success", nudity: { safe: 0.99, raw: 0.01 }, weapon: 0, recreational_drug: 0 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    };
+
+    const pubPortfolio = await client.createPortfolio({
+      title: "Nordic Series",
+      images: [
+        { filePath: img1, caption: "Fjord 1" },
+        { filePath: img1, caption: "Fjord 2" }
+      ],
+      tags: ["Landscape"],
+      coverIndex: 1,
+      coverAlignmentX: 0.8
+    });
+    assert.strictEqual(pubPortfolio.success, true);
+    assert.strictEqual(pubPortfolio.title, "Nordic Series");
+    assert.strictEqual(pubPortfolio.imageCount, 2);
+    assert(pubPortfolio.coverImageUrl?.includes("firebasestorage"));
+
+    // listPortfolios - target userId
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_artist")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "port_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/port_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "port_1" }, type: { stringValue: "portfolio" }, title: { stringValue: "Artist Portfolio" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const userPortfolios = await client.listPortfolios({ userId: "u_artist" });
+    assert.strictEqual(userPortfolios.length, 1);
+    assert.strictEqual(userPortfolios[0].title, "Artist Portfolio");
+
+    // listPortfolios - target username
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/elena")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_elena" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_elena")) {
+        return new Response(JSON.stringify({ fields: { postIds: { arrayValue: { values: [{ stringValue: "port_elena" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/port_elena")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "port_elena" }, type: { stringValue: "portfolio" }, title: { stringValue: "Elena Portfolio" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const elenaPorts = await client.listPortfolios({ username: "elena" });
+    assert.strictEqual(elenaPorts.length, 1);
+    assert.strictEqual(elenaPorts[0].title, "Elena Portfolio");
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

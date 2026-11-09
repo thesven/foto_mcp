@@ -79,7 +79,12 @@ export async function runTagTests() {
     { text: "Stars in the milky way astrophotography", expected: "Astrophotography" },
     { text: "Espresso in a quiet cafe coffee", expected: "Coffee" },
     { text: "Vacation wanderlust travel journey", expected: "Travel" },
-    { text: "Morning misty fog haze", expected: "Fog" }
+    { text: "Morning misty fog haze", expected: "Fog" },
+    { text: "Fujifilm X100V shot with classic chrome film simulation", expected: "Analog" },
+    { text: "Fujichrome velvia transparency slides with vibrant color", expected: "Color" },
+    { text: "Acros 100 fine grain film scan", expected: "Black and White" },
+    { text: "Night street lights captured on CineStill 800T film", expected: "Analog" },
+    { text: "Kodak Tri-X pushed to 1600", expected: "Black and White" }
   ];
 
   for (const s of samples) {
