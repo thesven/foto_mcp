@@ -479,3 +479,61 @@ export async function fetchUserProfile(params: {
     idToken: params.idToken
   });
 }
+
+/**
+ * Deletes a Firestore document by path and ID
+ */
+export async function deleteFirestoreDocument(params: {
+  collectionPath: string;
+  documentId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const url = `${FIRESTORE_BASE_URL}/${params.collectionPath}/${params.documentId}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`
+    }
+  });
+  return res.ok;
+}
+
+/**
+ * Clears the postIds array on a user profile
+ */
+export async function resetUserProfilePosts(params: {
+  userId: string;
+  idToken: string;
+}): Promise<boolean> {
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+  const userDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/user-profiles/${params.userId}`;
+
+  const res = await fetch(commitUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${params.idToken}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      writes: [
+        {
+          update: {
+            name: userDocPath,
+            fields: {
+              postIds: {
+                arrayValue: {
+                  values: []
+                }
+              }
+            }
+          },
+          updateMask: {
+            fieldPaths: ["postIds"]
+          }
+        }
+      ]
+    })
+  });
+  return res.ok;
+}
+

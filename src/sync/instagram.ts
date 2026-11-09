@@ -62,81 +62,107 @@ function unescapeHtml(text: string): string {
 }
 
 /**
- * Parses Instagram posts HTML export (e.g., posts_1.html)
+ * Parses Instagram posts HTML export (supports both standard and table-based exports)
  */
 export function parseInstagramPostsHtml(htmlContent: string): ParsedInstagramPost[] {
   const posts: ParsedInstagramPost[] = [];
   
-  // Each post is contained inside a post container div
-  const postRegex = /<div class="[^"]*uiBoxWhite[^"]*">([\s\S]*?)(?=(?:<div class="[^"]*uiBoxWhite)|$)/g;
-  let match: RegExpExecArray | null;
+  // All Instagram HTML exports separate posts with the date block:
+  // <div class="_3-94 _a6-o">([A-Za-z0-9, :]+)</div></div>
+  const chunks = htmlContent.split(/<div class="_3-94 _a6-o">([A-Za-z0-9, :]+)<\/div><\/div>/);
+  
+  if (chunks.length > 1) {
+    for (let i = 0; i < chunks.length - 1; i += 2) {
+      const block = chunks[i];
+      const dateStr = chunks[i + 1].trim();
 
-  while ((match = postRegex.exec(htmlContent)) !== null) {
-    const postHtml = match[1];
+      // Extract image path (first image if carousel)
+      const imgMatches = [
+        ...block.matchAll(/href="([^"]*\.(jpg|jpeg|png))"/gi),
+        ...block.matchAll(/<img[^>]*src="([^"]*\.(jpg|jpeg|png))"/gi)
+      ];
+      if (imgMatches.length === 0) continue;
 
-    // Extract caption / header in <h2>
-    const h2Match = postHtml.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
-    const rawCaption = h2Match ? unescapeHtml(h2Match[1].trim()) : "";
+      const imageRelativePath = imgMatches[0][1];
+      const imageFileName = path.basename(imageRelativePath);
 
-    // Extract image path
-    const imgMatch = postHtml.match(/<img src="([^"]+)"/);
-    const imageRelativePath = imgMatch ? imgMatch[1] : "";
-    const imageFileName = path.basename(imageRelativePath);
-
-    // Extract date
-    const dateMatch = postHtml.match(/<div class="[^"]*_a6-o">([^<]+)<\/div>/);
-    const dateStr = dateMatch ? dateMatch[1].trim() : undefined;
-
-    // Extract GPS if recorded by Instagram
-    let gpsDetected: { lat: number; lng: number } | undefined;
-    const latMatch = postHtml.match(/Latitude[\s\S]*?class="[^"]*_a6-q[^"]*">([0-9.-]+)<\/div>/i);
-    const lngMatch = postHtml.match(/Longitude[\s\S]*?class="[^"]*_a6-q[^"]*">([0-9.-]+)<\/div>/i);
-    if (latMatch && lngMatch) {
-      gpsDetected = {
-        lat: parseFloat(latMatch[1]),
-        lng: parseFloat(lngMatch[1])
-      };
-    }
-
-    // Split lines to separate title, camera info, location, hashtags, and narrative
-    const lines = rawCaption.split("\n").map((l) => l.trim()).filter(Boolean);
-    const title = lines[0] || "Untitled";
-
-    const hashtags: string[] = [];
-    const narrativeLines: string[] = [];
-    let cameraInfo: string | undefined;
-    let location: string | undefined;
-
-    for (const line of lines) {
-      if (line.startsWith("#")) {
-        // Collect hashtags
-        const tags = line.split(/\s+/).filter((t) => t.startsWith("#")).map((t) => t.slice(1));
-        hashtags.push(...tags);
-      } else if (line.startsWith("📷") || line.toLowerCase().includes("iso ") || line.toLowerCase().includes("f/")) {
-        cameraInfo = line;
-        narrativeLines.push(line);
-      } else if (line.startsWith("📌")) {
-        location = line;
-        narrativeLines.push(line);
+      // Extract caption
+      let rawCaption = "";
+      // Variant B: table cell
+      const tdCaption = block.match(/<td class="_a6_q">Caption<\/td><td class="_2piu _a6_r">([\s\S]*?)<\/td>/);
+      if (tdCaption) {
+        rawCaption = unescapeHtml(tdCaption[1].trim());
       } else {
-        narrativeLines.push(line);
+        // Variant A: h2
+        const h2Match = block.match(/<h2[^>]*>([\s\S]*?)<\/h2>/);
+        if (h2Match) {
+          const text = unescapeHtml(h2Match[1].trim());
+          if (!["Media", "Hashtags", "Place", "Posts"].includes(text)) {
+            rawCaption = text;
+          }
+        }
       }
+
+      if (!rawCaption) {
+        const divMatch = block.match(/<\/a><div>([\s\S]*?)<\/div><table/);
+        if (divMatch) {
+          rawCaption = unescapeHtml(divMatch[1].trim());
+        }
+      }
+
+      // Extract GPS if recorded
+      let gpsDetected: { lat: number; lng: number } | undefined;
+      const latMatch = block.match(/Latitude<\/div><div><div class="_a6-q">([0-9.-]+)<\/div>/) ||
+                       block.match(/<td class="_a6_q">Latitude<\/td><td class="_2piu _a6_r">([0-9.-]+)<\/td>/);
+      const lngMatch = block.match(/Longitude<\/div><div><div class="_a6-q">([0-9.-]+)<\/div>/) ||
+                       block.match(/<td class="_a6_q">Longitude<\/td><td class="_2piu _a6_r">([0-9.-]+)<\/td>/);
+      if (latMatch && lngMatch) {
+        const lat = parseFloat(latMatch[1]);
+        const lng = parseFloat(lngMatch[1]);
+        if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+          gpsDetected = { lat, lng };
+        }
+      }
+
+      // Split lines to separate title, camera info, location, hashtags, and narrative
+      const lines = rawCaption.split("\n").map((l) => l.trim()).filter(Boolean);
+      const title = lines[0] || "Untitled";
+
+      const hashtags: string[] = [];
+      const narrativeLines: string[] = [];
+      let cameraInfo: string | undefined;
+      let location: string | undefined;
+
+      for (const line of lines) {
+        if (line.startsWith("#")) {
+          const tags = line.split(/\s+/).filter((t) => t.startsWith("#")).map((t) => t.slice(1));
+          hashtags.push(...tags);
+        } else if (line.startsWith("📷") || line.startsWith("⚙️") || line.startsWith("🌌") || line.toLowerCase().includes("iso ") || line.toLowerCase().includes("f/")) {
+          cameraInfo = line;
+          narrativeLines.push(line);
+        } else if (line.startsWith("📌") || line.startsWith("📍")) {
+          location = line;
+          narrativeLines.push(line);
+        } else {
+          narrativeLines.push(line);
+        }
+      }
+
+      const cleanedCaption = narrativeLines.join("\n\n").trim();
+
+      posts.push({
+        title,
+        originalCaption: rawCaption,
+        cleanedCaption,
+        cameraInfo,
+        location,
+        hashtags,
+        imageRelativePath,
+        imageFileName,
+        dateStr,
+        gpsDetected
+      });
     }
-
-    const cleanedCaption = narrativeLines.join("\n\n").trim();
-
-    posts.push({
-      title,
-      originalCaption: rawCaption,
-      cleanedCaption,
-      cameraInfo,
-      location,
-      hashtags,
-      imageRelativePath,
-      imageFileName,
-      dateStr,
-      gpsDetected
-    });
   }
 
   return posts;
