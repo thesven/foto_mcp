@@ -17,13 +17,14 @@ import { VscoSyncTool } from "./sync/vsco.js";
 import { VaultExporter } from "./sync/vault.js";
 import { WatchFolderService } from "./sync/watcher.js";
 import { OfflineDraftQueue } from "./sync/queue.js";
+import { SERVER_VERSION } from "./config.js";
 
 const client = new FotoClient();
 const draftQueue = new OfflineDraftQueue(client);
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "3.0.0"
+  version: SERVER_VERSION
 });
 
 // Tool 1: foto_auth_status
@@ -1869,7 +1870,7 @@ async function main() {
         res.end(
           JSON.stringify({
             name: "foto_mcp",
-            version: "3.0.0",
+            version: SERVER_VERSION,
             status: "running",
             toolsCount: 49,
             resourcesCount: 10,
@@ -1881,12 +1882,12 @@ async function main() {
     });
 
     serverHttp.listen(port, () => {
-      console.error(`Foto MCP Server v3.0.0 running on SSE transport at http://localhost:${port}/sse`);
+      console.error(`Foto MCP Server v${SERVER_VERSION} running on SSE transport at http://localhost:${port}/sse`);
     });
   } else {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Foto MCP Server v3.0.0 running on stdio transport.");
+    console.error(`Foto MCP Server v${SERVER_VERSION} running on stdio transport.`);
   }
 }
 
