@@ -44,11 +44,19 @@ async function ensureConfigDir(): Promise<void> {
   await fs.mkdir(CONFIG_PATHS.configDir, { recursive: true, mode: 0o700 });
 }
 
+function getSystemUsername(): string {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return process.env.USER || process.env.LOGNAME || process.env.USERNAME || "user";
+  }
+}
+
 /**
  * Derives a deterministic 32-byte AES-256 key from FOTO_MASTER_KEY or host/user identity
  */
 function deriveEncryptionKey(): Buffer {
-  const secret = process.env.FOTO_MASTER_KEY || `foto-mcp-v3-${os.hostname()}-${os.userInfo().username}`;
+  const secret = process.env.FOTO_MASTER_KEY || `foto-mcp-v3-${os.hostname()}-${getSystemUsername()}`;
   return crypto.scryptSync(secret, "foto-mcp-salt-v3", 32);
 }
 
@@ -200,13 +208,29 @@ export async function clearCredentials(profileName?: string): Promise<void> {
     inMemoryProfiles.delete(target);
     const registry = await readProfilesRegistry();
     delete registry.profiles[target];
+    const remaining = Object.keys(registry.profiles);
     if (registry.activeProfile === target) {
-      const remaining = Object.keys(registry.profiles);
       registry.activeProfile = remaining[0] || "default";
       activeProfileName = registry.activeProfile;
     }
     await writeProfilesRegistry(registry);
-    if (target === "default") {
+
+    if (remaining.length === 0) {
+      try {
+        await fs.unlink(CONFIG_PATHS.credentialsFile);
+      } catch {
+        // Ignore
+      }
+    } else if (registry.activeProfile && registry.profiles[registry.activeProfile]) {
+      const newActive = await loadStoredCredentials(registry.activeProfile);
+      if (newActive) {
+        await fs.writeFile(
+          CONFIG_PATHS.credentialsFile,
+          JSON.stringify(newActive, null, 2),
+          { encoding: "utf-8", mode: 0o600 }
+        );
+      }
+    } else {
       try {
         await fs.unlink(CONFIG_PATHS.credentialsFile);
       } catch {

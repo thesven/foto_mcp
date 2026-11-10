@@ -83,10 +83,50 @@ export async function runQueueTests() {
     assert.strictEqual(pubDry.publishedCount, 2);
     assert.strictEqual(pubDry.results[0].status, "DRY_RUN_VALIDATED");
 
+    // 5b. Live publish queued drafts with mocked client
+    const origPublishPost = client.publishPost;
+    const origPublishSeries = client.publishSeries;
+    try {
+      client.publishPost = async () => ({ postId: "post_live_123" } as any);
+      client.publishSeries = async () => ({ postId: "series_live_456" } as any);
+
+      const pubLive = await queue.publishQueuedDrafts({ dryRun: false });
+      assert.strictEqual(pubLive.publishedCount, 2);
+      assert.strictEqual(pubLive.results[0].status, "PUBLISHED");
+      assert.strictEqual(pubLive.results[0].postId, "post_live_123");
+
+      // Verify clearPublished removes them
+      const clearPub = await queue.removeDraft({ clearPublished: true });
+      assert.strictEqual(clearPub.removedCount, 2);
+      assert.strictEqual(clearPub.remainingCount, 0);
+
+      // 5c. Test failed publish handling
+      const failDraft = await queue.enqueueDraft({
+        filePath: img1,
+        caption: "Will fail",
+        tags: ["Street"]
+      });
+      client.publishPost = async () => { throw new Error("Simulated network outage"); };
+      const failPub = await queue.publishQueuedDrafts({ draftId: failDraft.draftId, dryRun: false });
+      assert.strictEqual(failPub.failedCount, 1);
+      assert.strictEqual(failPub.results[0].status, "FAILED");
+      assert(failPub.results[0].errorMessage?.includes("Simulated network outage"));
+
+      const failListed = await queue.listDrafts({ status: "FAILED" });
+      assert.strictEqual(failListed.failedCount, 1);
+    } finally {
+      client.publishPost = origPublishPost;
+      client.publishSeries = origPublishSeries;
+    }
+
     // 6. Remove single draft by ID
-    const removed = await queue.removeDraft({ draftId: singleDraft.draftId });
+    const extraDraft = await queue.enqueueDraft({
+      filePath: img1,
+      caption: "To remove",
+      tags: ["Street"]
+    });
+    const removed = await queue.removeDraft({ draftId: extraDraft.draftId });
     assert.strictEqual(removed.removedCount, 1);
-    assert.strictEqual(removed.remainingCount, 1);
 
     // 7. Clear all
     const cleared = await queue.removeDraft({ clearAll: true });

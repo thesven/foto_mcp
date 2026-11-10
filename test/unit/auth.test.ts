@@ -81,8 +81,10 @@ export async function runAuthTests() {
       /not found/
     );
 
-    // Clear single profile
+    // Clear single profile and check credentials.json sync to remaining active profile
     await clearCredentials("street");
+    const activeAfterDelete = await loadStoredCredentials();
+    assert.strictEqual(activeAfterDelete?.userId, "u123");
 
     // 3. Clear credentials again
     await clearCredentials();

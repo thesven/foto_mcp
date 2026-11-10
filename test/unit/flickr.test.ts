@@ -103,12 +103,34 @@ export async function runFlickrTests() {
       exportPath: exportJsonPath,
       mediaDir: tempDir,
       dryRun: false,
-      maxPhotos: 1
+      maxPhotos: 1,
+      defaultTags: ["Analog", "Landscape"]
     });
 
     assert.strictEqual(liveReport.dryRun, false);
     assert.strictEqual(liveReport.readyToPublish, 1);
     assert(liveReport.candidates[0].publishResult?.postId);
+
+    // Test duplicate detection when existing posts match caption
+    const origGetProfile = client.getUserProfile;
+    client.getUserProfile = async () => ({
+      userId: "u_flickr_test",
+      posts: [{ description: "Morning Mist over Lake\n\nTaken with Leica M6\nShot on Kodak Portra 400" }]
+    });
+
+    const dupReport = await flickr.sync({
+      exportPath: exportJsonPath,
+      mediaDir: tempDir,
+      dryRun: true
+    });
+    client.getUserProfile = origGetProfile;
+    assert.strictEqual(dupReport.candidates[0].status, "ALREADY_PUBLISHED");
+
+    // Test fallback filename matching
+    const prefixImg = path.join(tempDir, "prefix999_custom.jpg");
+    await sharp({ create: { width: 100, height: 100, channels: 3, background: { r: 1, g: 2, b: 3 } } }).jpeg().toFile(prefixImg);
+    const resolvedPrefix = await flickr.resolveImageFile(tempDir, { id: "prefix999", name: "", description: "", tags: [] });
+    assert.strictEqual(resolvedPrefix, prefixImg);
 
     await clearCredentials();
   } finally {

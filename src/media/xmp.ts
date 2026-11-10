@@ -95,7 +95,7 @@ export function parseXmpString(xml: string, sidecarPath = "memory.xmp"): XmpMeta
   const lensModel =
     extractAttributeOrTag(xml, "aux:Lens") ||
     extractAttributeOrTag(xml, "exifEX:LensModel") ||
-    extractAttributeOrTag(xml, " lens:LensModel");
+    extractAttributeOrTag(xml, "lens:LensModel");
 
   const filmSimulation =
     extractAttributeOrTag(xml, "crs:CameraProfile") ||

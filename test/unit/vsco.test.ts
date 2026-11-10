@@ -88,6 +88,44 @@ export async function runVscoTests() {
       dryRun: true
     });
     assert(dirReport.totalParsed >= 3);
+
+    // 5. Test duplicate detection
+    client.getUserProfile = async () => ({
+      userId: "u_vsco",
+      posts: [{ description: "Quiet afternoon shadows in Lisbon" }]
+    });
+    const dupReport = await vscoTool.sync({
+      exportPath: exportJsonPath,
+      mediaDir: tempDir,
+      dryRun: true
+    });
+    assert.strictEqual(dupReport.candidates[0].status, "ALREADY_PUBLISHED");
+
+    // 6. Test live publishing with mocked publishPost
+    const origPublish = client.publishPost;
+    try {
+      client.publishPost = async () => ({ postId: "vsco_live_post" } as any);
+      client.getUserProfile = async () => ({ userId: "u_vsco", posts: [] });
+
+      const liveReport = await vscoTool.sync({
+        exportPath: exportJsonPath,
+        mediaDir: tempDir,
+        dryRun: false,
+        maxPhotos: 1,
+        defaultTags: ["Street", "Minimalist"]
+      });
+      assert.strictEqual(liveReport.dryRun, false);
+      assert.strictEqual(liveReport.candidates[0].status, "READY");
+      assert.strictEqual(liveReport.candidates[0].publishResult?.postId, "vsco_live_post");
+    } finally {
+      client.publishPost = origPublish;
+    }
+
+    // 7. Test prefix filename resolution
+    const prefixImg = path.join(tempDir, "vsco999_extra.jpg");
+    await sharp({ create: { width: 50, height: 50, channels: 3, background: { r: 10, g: 20, b: 30 } } }).jpeg().toFile(prefixImg);
+    const resolvedPrefix = await vscoTool.resolveImageFile(tempDir, { id: "vsco999", description: "", tags: [] });
+    assert.strictEqual(resolvedPrefix, prefixImg);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

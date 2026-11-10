@@ -126,8 +126,16 @@ export async function inspectImage(
   const fileStat = await fs.stat(filePath);
   const metadata = await sharp(filePath).metadata();
 
-  const width = metadata.width || 0;
-  const height = metadata.height || 0;
+  let width = metadata.width || 0;
+  let height = metadata.height || 0;
+
+  // If image has EXIF orientation 5-8, effective rendered width and height are swapped after rotation
+  if (metadata.orientation && metadata.orientation >= 5 && metadata.orientation <= 8) {
+    const tmp = width;
+    width = height;
+    height = tmp;
+  }
+
   const format = (metadata.format || "").toLowerCase();
 
   // Validate format (Foto only allows still photography; no GIFs or videos)
