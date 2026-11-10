@@ -565,6 +565,88 @@ export async function runFotoClientTests() {
     assert.strictEqual(elenaPorts.length, 1);
     assert.strictEqual(elenaPorts[0].title, "Elena Portfolio");
 
+    // v3.0.0: deleteComment, getPostLikes, updatePortfolio, deletePortfolio, updateUserProfile, reportContent, parseXmp
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("comments/c_client_del") && (!init?.method || init?.method === "GET")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_me" }, postId: { stringValue: "p1" } } }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const delComClient = await client.deleteComment({ commentId: "c_client_del", postId: "p1" });
+    assert.strictEqual(delComClient.success, true);
+
+    await assert.rejects(async () => client.deleteComment({ commentId: "", postId: "p1" }), /Invalid commentId/);
+    await assert.rejects(async () => client.deleteComment({ commentId: "c1", postId: "" }), /Invalid postId/);
+
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_likes_client")) {
+        return new Response(JSON.stringify({ fields: { likes: { arrayValue: { values: [{ stringValue: "u_fan" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_fan")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "fan_user" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const likesRes = await client.getPostLikes("p_likes_client", 10);
+    assert.strictEqual(likesRes.totalLikes, 1);
+    assert.strictEqual(likesRes.users[0].username, "fan_user");
+
+    await assert.rejects(async () => client.getPostLikes(""), /Invalid postId/);
+
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/port_c_1") && (!init?.method || init?.method === "GET")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              postId: { stringValue: "port_c_1" },
+              userId: { stringValue: "u_me" },
+              type: { stringValue: "portfolio" },
+              title: { stringValue: "Old" }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ name: "ok" }), { status: 200 });
+    };
+    const upPortClient = await client.updatePortfolio({
+      postId: "port_c_1",
+      title: "Updated Portfolio",
+      tags: ["Street"]
+    });
+    assert.strictEqual(upPortClient.success, true);
+
+    await assert.rejects(async () => client.updatePortfolio({ postId: "" }), /Invalid portfolio postId/);
+    await assert.rejects(async () => client.updatePortfolio({ postId: "port_c_1", tags: ["NotACuratedTag"] }), /Tag validation failed/);
+
+    const delPortClient = await client.deletePortfolio("port_c_1");
+    assert.strictEqual(delPortClient.success, true);
+    await assert.rejects(async () => client.deletePortfolio(""), /Invalid portfolio postId/);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { username: { stringValue: "u_me" }, bio: { stringValue: "New Bio" } } }), { status: 200 });
+    const upUserClient = await client.updateUserProfile({ bio: "New Bio", website: "https://sven.photo" });
+    assert.strictEqual(upUserClient.success, true);
+    assert.strictEqual(upUserClient.profile.bio, "New Bio");
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "rep_1" }), { status: 200 });
+    const repClient = await client.reportContent({ targetType: "post", targetId: "p_spam", reason: "Spam" });
+    assert.strictEqual(repClient.success, true);
+    await assert.rejects(async () => client.reportContent({ targetType: "post", targetId: "", reason: "Spam" }), /targetId is required/);
+    await assert.rejects(async () => client.reportContent({ targetType: "post", targetId: "p1", reason: "" }), /Report reason is required/);
+
+    const sampleXmp = path.join(tempDir, "img1.xmp");
+    await fs.writeFile(
+      sampleXmp,
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmp:Rating="5" xmp:Label="Green"/></rdf:RDF></x:xmpmeta>`,
+      "utf-8"
+    );
+    const parsedXmpClient = await client.parseXmp(img1);
+    assert.strictEqual(parsedXmpClient.rating, 5);
+    assert.strictEqual(parsedXmpClient.colorLabel, "Green");
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;

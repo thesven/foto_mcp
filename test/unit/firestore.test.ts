@@ -29,7 +29,14 @@ import {
   fetchUserNotifications,
   fetchHomeFeed,
   savePortfolioDocument,
-  fetchUserPortfolios
+  fetchUserPortfolios,
+  fetchWithRetry,
+  deleteCommentFromFirestore,
+  fetchPostLikesUsers,
+  updatePortfolioInFirestore,
+  deletePortfolioFromFirestore,
+  updateUserProfileInFirestore,
+  reportContentInFirestore
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -396,11 +403,30 @@ export async function runFirestoreTests() {
     const unfollowOk = await unfollowUserInFirestore({ currentUserId: "me", targetUserId: "target", idToken: "tok" });
     assert.strictEqual(unfollowOk, true);
 
-    // deletePostFromFirestore
+    // deletePostFromFirestore (including series images[] and tag_index shard cleanup)
     globalThis.fetch = async (url: any, init: any) => {
-      const urlStr = String(url);
-      if (urlStr.includes("posts/p_to_delete") && init?.method === "GET") {
-        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_to_delete" }, privateMetadataId: { stringValue: "meta_to_delete" } } }), { status: 200 });
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("posts/p_to_delete") && (!init?.method || init?.method === "GET")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              postId: { stringValue: "p_to_delete" },
+              privateMetadataId: { stringValue: "meta_to_delete" },
+              images: {
+                arrayValue: {
+                  values: [
+                    { mapValue: { fields: { privateMetadataId: { stringValue: "meta_series_2" } } } }
+                  ]
+                }
+              },
+              tags: { arrayValue: { values: [{ stringValue: "Street" }] } }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("Street_meta")) {
+        return new Response(JSON.stringify({ fields: { currentShard: { integerValue: "0" } } }), { status: 200 });
       }
       return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
     };
@@ -478,16 +504,35 @@ export async function runFirestoreTests() {
     const unlikeOk = await unlikePostInFirestore({ postId: "p_like", userId: "u1", idToken: "tok" });
     assert.strictEqual(unlikeOk, true);
 
-    // fetchPostComments
+    // fetchPostComments (with threaded replies)
+    let commentQueryCall = 0;
     globalThis.fetch = async (url: any, init: any) => {
+      commentQueryCall++;
+      if (commentQueryCall === 1) {
+        return new Response(
+          JSON.stringify([
+            {
+              document: {
+                name: "projects/.../comments/c1",
+                fields: {
+                  text: { stringValue: "Great lighting!" },
+                  username: { stringValue: "anna_photo" }
+                }
+              }
+            }
+          ]),
+          { status: 200 }
+        );
+      }
+      // Second query is replies
       return new Response(
         JSON.stringify([
           {
             document: {
-              name: "projects/.../comments/c1",
+              name: "projects/.../replies/r1",
               fields: {
-                text: { stringValue: "Great lighting!" },
-                username: { stringValue: "anna_photo" }
+                text: { stringValue: "Thank you Anna!" },
+                parentCommentId: { stringValue: "c1" }
               }
             }
           }
@@ -495,16 +540,68 @@ export async function runFirestoreTests() {
         { status: 200 }
       );
     };
-    const comments = await fetchPostComments({ postId: "p1", idToken: "tok" });
+    const comments = await fetchPostComments({ postId: "p1", idToken: "tok", includeReplies: true });
     assert.strictEqual(comments.length, 1);
     assert.strictEqual(comments[0].text, "Great lighting!");
     assert.strictEqual(comments[0].commentId, "c1");
+    assert.strictEqual(comments[0].replies?.length, 1);
+    assert.strictEqual(comments[0].replies[0].text, "Thank you Anna!");
 
-    // addPostComment
+    // addPostComment (top-level and threaded reply)
     globalThis.fetch = async () => new Response(JSON.stringify({ name: "projects/.../comments/new_c" }), { status: 200 });
     const addedComment = await addPostComment({ postId: "p1", userId: "u1", text: "Inspiring shot!", idToken: "tok" });
     assert.strictEqual(addedComment.text, "Inspiring shot!");
     assert.strictEqual(addedComment.postId, "p1");
+
+    const addedReply = await addPostComment({
+      postId: "p1",
+      userId: "u1",
+      text: "Shot on Portra 400",
+      parentCommentId: "c1",
+      idToken: "tok"
+    });
+    assert.strictEqual(addedReply.parentCommentId, "c1");
+    assert(addedReply.replyId);
+
+    // deleteCommentFromFirestore (top-level and reply, plus permission errors)
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("comments/c_del") && (!init?.method || init?.method === "GET")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u1" }, postId: { stringValue: "p1" } } }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const delComOk = await deleteCommentFromFirestore({ commentId: "c_del", postId: "p1", userId: "u1", idToken: "tok" });
+    assert.strictEqual(delComOk, true);
+
+    const delReplyOk = await deleteCommentFromFirestore({ commentId: "r_del", postId: "p1", userId: "u1", idToken: "tok", isReply: true });
+    assert.strictEqual(delReplyOk, true);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { userId: { stringValue: "other_user" } } }), { status: 200 });
+    await assert.rejects(
+      async () => deleteCommentFromFirestore({ commentId: "c_other", postId: "p1", userId: "u1", idToken: "tok" }),
+      /Permission denied/
+    );
+
+    // fetchPostLikesUsers
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_liked")) {
+        return new Response(JSON.stringify({ fields: { likes: { arrayValue: { values: [{ stringValue: "u_fan1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_fan1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "fan_one" }, displayName: { stringValue: "Fan One" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const likedUsers = await fetchPostLikesUsers({ postId: "p_liked", idToken: "tok" });
+    assert.strictEqual(likedUsers.totalLikes, 1);
+    assert.strictEqual(likedUsers.users[0].username, "fan_one");
+
+    await assert.rejects(
+      async () => fetchPostLikesUsers({ postId: "p_missing_likes", idToken: "tok" }),
+      /not found/
+    );
 
     // fetchUserNotifications
     globalThis.fetch = async () => {
@@ -626,9 +723,112 @@ export async function runFirestoreTests() {
     const emptyPorts = await fetchUserPortfolios({ userId: "nonexistent", idToken: "tok" });
     assert.strictEqual(emptyPorts.length, 0);
 
+    // updatePortfolioInFirestore & deletePortfolioFromFirestore
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/port_edit") && (!init?.method || init?.method === "GET")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              postId: { stringValue: "port_edit" },
+              userId: { stringValue: "u1" },
+              type: { stringValue: "portfolio" },
+              title: { stringValue: "Old Title" },
+              images: {
+                arrayValue: {
+                  values: [
+                    {
+                      mapValue: {
+                        fields: {
+                          id: { stringValue: "img_1" },
+                          imageUrl: { stringValue: "https://img/1.jpg" },
+                          imagePath: { stringValue: "p/1" },
+                          fullWidth: { integerValue: "1820" },
+                          fullHeight: { integerValue: "1200" }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ name: "updated" }), { status: 200 });
+    };
+
+    const updatedPort = await updatePortfolioInFirestore({
+      postId: "port_edit",
+      userId: "u1",
+      title: "New Portfolio Title",
+      description: "New Desc",
+      tags: ["Landscape"],
+      coverImageId: "img_1",
+      coverAlignmentX: 0.3,
+      idToken: "tok"
+    });
+    assert.strictEqual(updatedPort.title, "New Portfolio Title");
+    assert.strictEqual(updatedPort.coverImageId, "img_1");
+
+    const deletedPortOk = await deletePortfolioFromFirestore({
+      postId: "port_edit",
+      userId: "u1",
+      idToken: "tok"
+    });
+    assert.strictEqual(deletedPortOk, true);
+
+    // updateUserProfileInFirestore
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { username: { stringValue: "u1" }, bio: { stringValue: "Updated bio" } } }), { status: 200 });
+    const updatedUserProf = await updateUserProfileInFirestore({
+      userId: "u1",
+      displayName: "Sven",
+      bio: "Updated bio",
+      website: "https://sven.photo",
+      profilePhotoUrl: "https://sven.photo/avatar.jpg",
+      idToken: "tok"
+    });
+    assert.strictEqual(updatedUserProf.bio, "Updated bio");
+
+    // reportContentInFirestore
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "reported" }), { status: 200 });
+    const repPost = await reportContentInFirestore({
+      reporterUserId: "u1",
+      targetType: "post",
+      targetId: "p_bad",
+      reason: "Spam",
+      details: "Bot post",
+      idToken: "tok"
+    });
+    assert.strictEqual(repPost.postId, "p_bad");
+
+    const repUser = await reportContentInFirestore({
+      reporterUserId: "u1",
+      targetType: "user",
+      targetId: "u_bad",
+      reason: "Impersonation",
+      idToken: "tok"
+    });
+    assert.strictEqual(repUser.reportedUserId, "u_bad");
+
+    // fetchWithRetry (retries on 429, succeeds on 2nd attempt)
+    let retryCount = 0;
+    globalThis.fetch = async () => {
+      retryCount++;
+      if (retryCount === 1) {
+        return new Response("Too Many Requests", { status: 429 });
+      }
+      return new Response("OK", { status: 200 });
+    };
+    const retryRes = await fetchWithRetry("https://example.com/api", { method: "GET" }, { maxRetries: 2, baseDelayMs: 10 });
+    assert.strictEqual(retryRes.status, 200);
+    assert.strictEqual(retryCount, 2);
+
   } finally {
     globalThis.fetch = originalFetch;
   }
 
   console.log("  ✓ Firestore unit tests passed");
 }
+

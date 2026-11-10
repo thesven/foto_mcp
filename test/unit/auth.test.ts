@@ -9,7 +9,12 @@ import {
   signInWithEmailAndPassword,
   refreshIdToken,
   getValidAuthSession,
-  getAuthStatus
+  getAuthStatus,
+  encryptCredentialsPayload,
+  decryptCredentialsPayload,
+  listProfiles,
+  switchProfile,
+  getActiveProfileName
 } from "../../src/api/auth.js";
 import { CONFIG_PATHS } from "../../src/config.js";
 
@@ -40,6 +45,45 @@ export async function runAuthTests() {
     assert.strictEqual(loaded?.userId, "u123");
     assert.strictEqual(loaded?.email, "test@example.com");
 
+    // 2b. Test AES-256-GCM encryption & decryption roundtrip
+    const encrypted = encryptCredentialsPayload(sampleCreds);
+    assert(encrypted.includes(":"), "Encrypted payload must have iv:tag:ciphertext format");
+    const decrypted = decryptCredentialsPayload(encrypted);
+    assert.strictEqual(decrypted?.userId, "u123");
+    assert.strictEqual(decryptCredentialsPayload("invalid:payload"), null);
+
+    // 2c. Test Multi-Profile save, list, and switch
+    await saveCredentials(
+      {
+        userId: "u_street",
+        email: "street@example.com",
+        idToken: "tok-street",
+        refreshToken: "ref-street",
+        expiresAt: Date.now() + 3600000
+      },
+      "street"
+    );
+    assert.strictEqual(getActiveProfileName(), "street");
+
+    const profilesList = await listProfiles();
+    assert(profilesList.profiles.length >= 2);
+    assert.strictEqual(profilesList.activeProfile, "street");
+
+    const switched = await switchProfile("default");
+    assert.strictEqual(switched.success, true);
+    assert.strictEqual(switched.activeProfile, "default");
+    assert.strictEqual(switched.userId, "u123");
+
+    await assert.rejects(
+      async () => {
+        await switchProfile("nonexistent_profile");
+      },
+      /not found/
+    );
+
+    // Clear single profile
+    await clearCredentials("street");
+
     // 3. Clear credentials again
     await clearCredentials();
 
@@ -67,9 +111,10 @@ export async function runAuthTests() {
       );
     };
 
-    const signedIn = await signInWithEmailAndPassword("test@example.com", "secret123");
+    const signedIn = await signInWithEmailAndPassword("test@example.com", "secret123", "studio");
     assert.strictEqual(signedIn.userId, "uid-789");
     assert.strictEqual(signedIn.idToken, "new-id-token");
+    assert.strictEqual(signedIn.profileName, "studio");
 
     // 6. signInWithEmailAndPassword - INVALID_LOGIN_CREDENTIALS error
     globalThis.fetch = async () => {
@@ -239,6 +284,7 @@ export async function runAuthTests() {
     const statusActive = await getAuthStatus();
     assert.strictEqual(statusActive.loggedIn, true);
     assert.strictEqual(statusActive.email, "active@example.com");
+    assert.strictEqual(statusActive.encryptedAtRest, true);
     assert(statusActive.expiresInMinutes && statusActive.expiresInMinutes > 20);
 
     // State D: Expired token refresh fails when no env vars configured
@@ -271,3 +317,4 @@ export async function runAuthTests() {
 
   console.log("  ✓ Auth unit tests passed");
 }
+

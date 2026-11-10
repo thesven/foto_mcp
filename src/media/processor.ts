@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import sharp from "sharp";
 import exifr from "exifr";
 import { PLATFORM_LIMITS } from "../config.js";
+import { findXmpSidecarForImage, parseXmpFile, XmpMetadata } from "./xmp.js";
 
 export interface ImageInspection {
   filePath: string;
@@ -14,6 +15,7 @@ export interface ImageInspection {
   hasGps: boolean;
   gpsDetails?: { latitude?: number; longitude?: number };
   exif: Record<string, any>;
+  xmp?: XmpMetadata;
   targetUploadDimensions: {
     width: number;
     height: number;
@@ -115,7 +117,7 @@ export async function generateImagePreview(
 }
 
 /**
- * Inspects a local image file and parses technical EXIF and geometry without modifying it.
+ * Inspects a local image file and parses technical EXIF, XMP sidecar, and geometry without modifying it.
  */
 export async function inspectImage(
   filePath: string,
@@ -176,6 +178,22 @@ export async function inspectImage(
   if (rawExif.DateTimeOriginal) cleanExif.DateTimeOriginal = String(rawExif.DateTimeOriginal);
   if (rawExif.Software) cleanExif.Software = String(rawExif.Software);
 
+  // Check for accompanying .xmp sidecar (Lightroom / Capture One / Darktable)
+  let xmpMeta: XmpMetadata | undefined;
+  try {
+    const sidecarPath = await findXmpSidecarForImage(filePath);
+    if (sidecarPath) {
+      xmpMeta = await parseXmpFile(sidecarPath);
+      if (!cleanExif.Make && xmpMeta.cameraMake) cleanExif.Make = xmpMeta.cameraMake;
+      if (!cleanExif.Model && xmpMeta.cameraModel) cleanExif.Model = xmpMeta.cameraModel;
+      if (!cleanExif.LensModel && xmpMeta.lensModel) cleanExif.LensModel = xmpMeta.lensModel;
+      if (xmpMeta.filmSimulation) cleanExif.FilmSimulation = xmpMeta.filmSimulation;
+      if (xmpMeta.filmStock) cleanExif.FilmStock = xmpMeta.filmStock;
+    }
+  } catch {
+    // Non-fatal if XMP sidecar cannot be read
+  }
+
   // Calculate target upload dimensions
   const maxDim = PLATFORM_LIMITS.maxDimension;
   let targetWidth = width;
@@ -212,6 +230,7 @@ export async function inspectImage(
     hasGps,
     gpsDetails: hasGps ? { latitude: gpsData.latitude, longitude: gpsData.longitude } : undefined,
     exif: cleanExif,
+    xmp: xmpMeta,
     targetUploadDimensions: {
       width: targetWidth,
       height: targetHeight
@@ -230,7 +249,7 @@ export async function inspectImage(
  * 2. Compresses to JPEG 80%.
  * 3. Scrubs GPS and thumbnail metadata from binary for privacy.
  * 4. Extracts sanitized camera EXIF map for image-private-metadata Firestore storage.
- * 5. Converts to standard sRGB color space to preserve color fidelity on all devices.
+ * 5. Converts to standard sRGB color space and embeds sRGB IEC61966-2.1 ICC profile.
  */
 export async function prepareImageForUpload(filePath: string): Promise<PreparedImage> {
   const inspection = await inspectImage(filePath, { preview: false });
@@ -241,10 +260,11 @@ export async function prepareImageForUpload(filePath: string): Promise<PreparedI
 
   const { width: targetWidth, height: targetHeight } = inspection.targetUploadDimensions;
 
-  // Sharp processing: resize, convert to sRGB, strip GPS metadata, encode as JPEG 80%
+  // Sharp processing: resize, convert to sRGB, embed sRGB ICC profile while stripping EXIF/GPS metadata, encode as JPEG 80%
   const processedBuffer = await sharp(filePath)
     .rotate() // Automatically orient based on EXIF orientation
     .toColorspace("srgb") // Normalize to standard sRGB colorspace
+    .withIccProfile("srgb") // Embed standard sRGB IEC61966-2.1 ICC profile (without copying EXIF/GPS)
     .resize({
       width: targetWidth,
       height: targetHeight,
@@ -270,3 +290,4 @@ export async function prepareImageForUpload(filePath: string): Promise<PreparedI
     hasStrippedGps: inspection.hasGps
   };
 }
+

@@ -5,6 +5,34 @@ All notable changes to `foto_mcp` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-11-10
+
+### Added
+- **Full Content Lifecycle & Social Graph Parity (42 Total MCP Tools)**:
+  - `foto_update_portfolio` & `foto_delete_portfolio`: Full CRUD lifecycle for curated Portfolio showcases (`type: "portfolio"`), supporting live updates to title, artist statement, curated tags, cover slide selection, and horizontal alignment, plus cascade deletion across all slide private metadata and tag shards.
+  - `foto_delete_comment`: Delete your comments or threaded replies from `comments` or `replies` with automatic `commentCount` decrementing.
+  - `foto_get_post_likes`: Inspect the photographers who liked a post (`/app/liked-by/:postId`), resolving user IDs, usernames, display names, avatars, and profile URLs.
+  - `foto_update_user_profile`: Update authenticated photographer profile fields (`displayName`, `bio`, `website`, `profilePhotoUrl`) in `user-profiles/{userId}`.
+  - `foto_report_content`: Submit community safety moderation reports to `reported-posts` or `reported-users`.
+  - **Threaded Comment Replies**: Upgraded `foto_get_comments` (`includeReplies: true`) and `foto_post_comment` (`parentCommentId`) to read and write nested replies in Firestore's `replies` collection.
+  - **Cascade Post & Series Cleanup**: Upgraded `deletePostFromFirestore` to delete all `privateMetadataId` records across multi-image `images[]` arrays and remove deleted `postId`s from active `tag_index` shards.
+- **Studio Color Science & Adobe Lightroom / Capture One `.xmp` Sidecars**:
+  - `foto_parse_xmp`: Dedicated `.xmp` sidecar parser (`src/media/xmp.ts`) extracting star ratings (`xmp:Rating`), color labels (`xmp:Label`), Dublin Core titles/descriptions (`dc:title`, `dc:description`), hierarchical keywords (`dc:subject`, `lr:hierarchicalSubject`), camera/lens info, and Fujifilm film simulation metadata.
+  - Upgraded `foto_watch_directory` and `foto_inspect_image` to automatically discover companion `.xmp` sidecars and filter studio exports by `minRating` (1–5 stars) and `colorLabel` (`Red`, `Yellow`, `Green`, `Blue`, `Purple`).
+  - Upgraded `prepareImageForUpload` with `.withIccProfile("srgb")` so normalized uploads embed a standard sRGB IEC61966-2.1 ICC profile while keeping GPS and thumbnail IFDs completely stripped.
+- **VSCO Archive & Preset Importer**:
+  - `foto_sync_vsco`: Migrates photography archives from VSCO JSON exports, mapping VSCO film emulation presets (`A4`, `A6`, `M5`, `B1`, `B5`, `C1`, `F2`, `G3`, `HB2`, `KP1`, `KX4`, `T1`, `P5`, etc.) directly to Foto's 303 curated tags (`Analog`, `Film`, `Black and White`, `Portrait`, `Color`, `Moody`, `Minimal`).
+- **Multi-Account Profiles, AES-256-GCM Encryption & Offline Draft Queue**:
+  - `foto_list_profiles` & `foto_switch_profile`: Named multi-account profile management (`default`, `street`, `studio`, etc.) with profile-scoped `foto_login` and `foto_logout`.
+  - **Encrypted Credential Storage**: Added AES-256-GCM encryption at rest (`encryptCredentialsPayload` / `decryptCredentialsPayload` in `profiles.json`) using `FOTO_CREDENTIALS_SECRET` or host key derivation while preserving full backward compatibility with `credentials.json`.
+  - `foto_queue_draft` & `foto_manage_draft_queue`: Persistent local offline draft queue (`~/.config/foto-mcp/draft-queue.json`) supporting staging single posts or multi-image series offline and batch-publishing (`action: "list" | "publish" | "remove"`).
+  - **Exponential Backoff Retries**: Added `fetchWithRetry` for resilient handling of transient `429`, `502`, `503`, and `504` responses.
+  - **Multi-Session SSE Transport**: Upgraded SSE HTTP server to track concurrent client sessions via `sessionId` and expose a JSON health/capabilities status endpoint.
+- **Expanded MCP Resources (7 Total) & Prompts (5 Total)**:
+  - Added `foto://my/profile` resource and `foto://tags/{tag}/recent` dynamic resource template.
+  - Added `photo_walk_curator` and `daily_foto_briefing` masterclass prompts.
+  - Upgraded `foto_draft_post` to return multimodal `ImageContent` (`image/jpeg`) previews alongside validation diagnostics.
+
 ## [2.0.0] - 2026-11-09
 
 ### Added

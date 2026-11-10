@@ -60,6 +60,24 @@ export async function runWatcherTests() {
     assert.strictEqual(noPrevReport.totalImagesFound, 2);
     assert.strictEqual(noPrevReport.drafts[0].inspection.previewBase64, undefined);
 
+    // 4. Scan with XMP sidecar rating & color label filtering
+    await fs.writeFile(
+      path.join(exportFolder, "tokyo_rain_street.xmp"),
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmp:Rating="5" xmp:Label="Green"><dc:title><rdf:Alt><rdf:li xml:lang="x-default">Shinjuku Neon</rdf:li></rdf:Alt></dc:title></rdf:Description></rdf:RDF></x:xmpmeta>`,
+      "utf-8"
+    );
+
+    const ratedReport = await watcher.scanWatchDirectory({
+      directoryPath: exportFolder,
+      includePreview: false,
+      minRating: 4,
+      colorLabel: "Green"
+    });
+    assert.strictEqual(ratedReport.drafts.length, 1);
+    assert.strictEqual(ratedReport.filteredOutByXmp, 1);
+    assert(ratedReport.drafts[0].suggestedCaption?.includes("Shinjuku Neon"));
+    assert.strictEqual(ratedReport.drafts[0].xmp?.rating, 5);
+
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

@@ -40,5 +40,12 @@ export const CONFIG_PATHS = {
   },
   get credentialsFile(): string {
     return path.join(this.configDir, "credentials.json");
+  },
+  get profilesFile(): string {
+    return path.join(this.configDir, "profiles.json");
+  },
+  get draftQueueFile(): string {
+    return path.join(this.configDir, "draft-queue.json");
   }
 };
+

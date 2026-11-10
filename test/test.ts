@@ -26,6 +26,9 @@ import { runInstagramTests } from "./unit/instagram.test.js";
 import { runFlickrTests } from "./unit/flickr.test.js";
 import { runVaultTests } from "./unit/vault.test.js";
 import { runWatcherTests } from "./unit/watcher.test.js";
+import { runXmpTests } from "./unit/xmp.test.js";
+import { runVscoTests } from "./unit/vsco.test.js";
+import { runQueueTests } from "./unit/queue.test.js";
 import { runMcpServerTests } from "./unit/mcp-server.test.js";
 
 async function runTests() {
@@ -240,6 +243,9 @@ async function runTests() {
   await runFlickrTests();
   await runVaultTests();
   await runWatcherTests();
+  await runXmpTests();
+  await runVscoTests();
+  await runQueueTests();
   await runMcpServerTests();
 
   console.log("\n=== All Tests Passed Successfully! ===");

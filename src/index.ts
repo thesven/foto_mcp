@@ -3,28 +3,39 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { FotoClient } from "./foto-client.js";
-import { signInWithEmailAndPassword, clearCredentials, getAuthStatus } from "./api/auth.js";
+import {
+  signInWithEmailAndPassword,
+  clearCredentials,
+  getAuthStatus,
+  listProfiles,
+  switchProfile
+} from "./api/auth.js";
 import { searchTags, suggestTags, FOTO_ALLOWED_TAGS } from "./tags.js";
 import { InstagramSyncTool } from "./sync/instagram.js";
 import { FlickrSyncTool } from "./sync/flickr.js";
+import { VscoSyncTool } from "./sync/vsco.js";
 import { VaultExporter } from "./sync/vault.js";
 import { WatchFolderService } from "./sync/watcher.js";
+import { OfflineDraftQueue } from "./sync/queue.js";
 
 const client = new FotoClient();
+const draftQueue = new OfflineDraftQueue(client);
 
 const server = new McpServer({
   name: "foto_mcp",
-  version: "2.0.0"
+  version: "3.0.0"
 });
 
 // Tool 1: foto_auth_status
 server.tool(
   "foto_auth_status",
-  "Check the current authentication status with Foto app (logged-in user, token validity).",
-  {},
-  async () => {
+  "Check the current authentication status with Foto app (logged-in user, active profile, token validity).",
+  {
+    profileName: z.string().optional().describe("Optional profile name to inspect (defaults to active profile)")
+  },
+  async ({ profileName }) => {
     try {
-      const status = await getAuthStatus();
+      const status = await getAuthStatus(profileName);
       return {
         content: [
           {
@@ -45,19 +56,20 @@ server.tool(
 // Tool 2: foto_login
 server.tool(
   "foto_login",
-  "Authenticate with Foto app using your account email and password. Securely stores credentials locally.",
+  "Authenticate with Foto app using your account email and password. Securely stores encrypted credentials locally under the specified profile.",
   {
     email: z.string().email().describe("Your Foto account email address"),
-    password: z.string().min(1).describe("Your Foto account password")
+    password: z.string().min(1).describe("Your Foto account password"),
+    profileName: z.string().optional().describe("Optional profile alias (e.g. 'default', 'street', 'studio')")
   },
-  async ({ email, password }) => {
+  async ({ email, password, profileName }) => {
     try {
-      const creds = await signInWithEmailAndPassword(email, password);
+      const creds = await signInWithEmailAndPassword(email, password, profileName);
       return {
         content: [
           {
             type: "text",
-            text: `Successfully authenticated with Foto!\nUser ID: ${creds.userId}\nEmail: ${creds.email}\nSession token cached securely.`
+            text: `Successfully authenticated with Foto!\nProfile: ${creds.profileName || "default"}\nUser ID: ${creds.userId}\nEmail: ${creds.email}\nSession token encrypted and cached securely.`
           }
         ]
       };
@@ -74,15 +86,19 @@ server.tool(
 server.tool(
   "foto_logout",
   "Log out of Foto app and delete stored credentials from local disk.",
-  {},
-  async () => {
+  {
+    profileName: z.string().optional().describe("Optional profile name to log out of (if omitted, clears all stored sessions)")
+  },
+  async ({ profileName }) => {
     try {
-      await clearCredentials();
+      await clearCredentials(profileName);
       return {
         content: [
           {
             type: "text",
-            text: "Successfully logged out of Foto and cleared cached credentials."
+            text: profileName
+              ? `Successfully logged out of Foto profile "${profileName}".`
+              : "Successfully logged out of Foto and cleared cached credentials."
           }
         ]
       };
@@ -98,7 +114,7 @@ server.tool(
 // Tool 4: foto_inspect_image
 server.tool(
   "foto_inspect_image",
-  "Inspect a local image file without uploading: extracts technical EXIF (camera, lens, ISO, shutter, aperture), dimensions, aspect ratio, color space, and checks for GPS presence. Includes base64 preview image thumbnail for visual multimodal inspection.",
+  "Inspect a local image file without uploading: extracts technical EXIF (camera, lens, ISO, shutter, aperture), Lightroom/Capture One .xmp sidecar metadata, dimensions, aspect ratio, color space, and checks for GPS presence. Includes base64 preview image thumbnail for visual multimodal inspection.",
   {
     filePath: z.string().describe("Absolute file path to the local image (JPEG, PNG, WebP, HEIC, TIFF)"),
     includePreview: z.boolean().optional().describe("Whether to include base64 visual thumbnail image content (default: true)")
@@ -203,23 +219,35 @@ server.tool(
 // Tool 7: foto_draft_post
 server.tool(
   "foto_draft_post",
-  "Preview and validate a post draft without publishing. Validates tag constraints (1-3 from whitelist), formats EXIF summary, and checks image parameters.",
+  "Preview and validate a post draft without publishing. Validates tag constraints (1-3 from whitelist), formats EXIF summary, checks image parameters, and returns a multimodal sRGB visual preview.",
   {
     filePath: z.string().describe("Absolute file path to local image"),
     caption: z.string().describe("The post caption or narrative description"),
-    tags: z.array(z.string()).describe("1 to 3 tags chosen from Foto's curated list")
+    tags: z.array(z.string()).describe("1 to 3 tags chosen from Foto's curated list"),
+    includePreview: z.boolean().optional().describe("Whether to include base64 visual thumbnail image content (default: true)")
   },
-  async ({ filePath, caption, tags }) => {
+  async ({ filePath, caption, tags, includePreview = true }) => {
     try {
-      const draft = await client.draftPost({ filePath, caption, tags });
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(draft, null, 2)
-          }
-        ]
-      };
+      const draft = await client.draftPost({ filePath, caption, tags, includePreview });
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      > = [
+        {
+          type: "text",
+          text: JSON.stringify(draft, null, 2)
+        }
+      ];
+
+      if (includePreview && draft.previewBase64) {
+        content.push({
+          type: "image",
+          data: draft.previewBase64,
+          mimeType: "image/jpeg"
+        });
+      }
+
+      return { content };
     } catch (err: any) {
       return {
         isError: true,
@@ -232,7 +260,7 @@ server.tool(
 // Tool 8: foto_publish_post
 server.tool(
   "foto_publish_post",
-  "Publish a single photo post to Foto. Automatically normalizes resolution (max 1820px, JPEG 80%), scrubs GPS for privacy, uploads to Storage, passes moderation, and creates the post. Use dryRun=true to test locally without publishing.",
+  "Publish a single photo post to Foto. Automatically normalizes resolution (max 1820px, JPEG 80%, embedded sRGB ICC), scrubs GPS for privacy, uploads to Storage, passes moderation, and creates the post. Use dryRun=true to test locally without publishing.",
   {
     filePath: z.string().describe("Absolute file path to local photo"),
     caption: z.string().describe("The post caption or narrative description"),
@@ -339,7 +367,6 @@ server.tool(
       let existingFotoCaptions: string[] = [];
       try {
         const profile = await client.getUserProfile();
-        // Extract existing post IDs/descriptions if available
         if (profile && profile.recentTags) {
           existingFotoCaptions = profile.recentTags;
         }
@@ -503,7 +530,7 @@ server.tool(
 // Tool 16: foto_delete_post
 server.tool(
   "foto_delete_post",
-  "Delete a published post on Foto by post ID. Automatically removes the post document, scrubs private metadata, and updates your user profile.",
+  "Delete a published post on Foto by post ID. Automatically removes the post document, scrubs all slide private metadata, updates your user profile, and prunes tag shards.",
   {
     postId: z.string().describe("The post ID of the post to delete")
   },
@@ -638,14 +665,15 @@ server.tool(
 // Tool 22: foto_get_comments
 server.tool(
   "foto_get_comments",
-  "Retrieve comments and discussions on a Foto post by post ID.",
+  "Retrieve comments and nested threaded replies on a Foto post by post ID.",
   {
     postId: z.string().describe("The post ID to get comments for"),
-    limit: z.number().int().positive().max(50).optional().describe("Maximum comments to retrieve (default: 20)")
+    limit: z.number().int().positive().max(50).optional().describe("Maximum comments to retrieve (default: 20)"),
+    includeReplies: z.boolean().optional().describe("Whether to resolve threaded replies from the replies collection (default: true)")
   },
-  async ({ postId, limit }) => {
+  async ({ postId, limit, includeReplies = true }) => {
     try {
-      const comments = await client.getComments(postId, limit);
+      const comments = await client.getComments(postId, limit, includeReplies);
       return {
         content: [{ type: "text", text: JSON.stringify({ postId, count: comments.length, comments }, null, 2) }]
       };
@@ -661,14 +689,15 @@ server.tool(
 // Tool 23: foto_post_comment
 server.tool(
   "foto_post_comment",
-  "Post a thoughtful comment or critique on a Foto post.",
+  "Post a thoughtful comment or threaded reply on a Foto post.",
   {
     postId: z.string().describe("The post ID to comment on"),
-    text: z.string().min(1).describe("Comment text or photographic reflection")
+    text: z.string().min(1).describe("Comment text or photographic reflection"),
+    parentCommentId: z.string().optional().describe("Optional parent comment ID if posting a threaded reply")
   },
-  async ({ postId, text }) => {
+  async ({ postId, text, parentCommentId }) => {
     try {
-      const result = await client.postComment(postId, text);
+      const result = await client.postComment(postId, text, parentCommentId);
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
       };
@@ -725,7 +754,7 @@ server.tool(
   }
 );
 
-// Tool 25: foto_create_portfolio
+// Tool 26: foto_create_portfolio
 server.tool(
   "foto_create_portfolio",
   "Create and publish a multi-image curated portfolio showcase to Foto. Includes title, custom cover image selection, alignment, and 1-3 curated tags. Supports dryRun=true.",
@@ -767,7 +796,7 @@ server.tool(
   }
 );
 
-// Tool 26: foto_list_portfolios
+// Tool 27: foto_list_portfolios
 server.tool(
   "foto_list_portfolios",
   "List portfolio showcase collections for a specific user or the currently authenticated user.",
@@ -791,7 +820,7 @@ server.tool(
   }
 );
 
-// Tool 27: foto_sync_flickr
+// Tool 28: foto_sync_flickr
 server.tool(
   "foto_sync_flickr",
   "Migrate and sync photo archives from a Flickr export (JSON account export or photo JSON files) to Foto. Normalizes tags to 303 whitelist, strips GPS, prevents duplicate republishing, and prepares 1820px zero-crop uploads. Supports dryRun=true (default).",
@@ -824,7 +853,7 @@ server.tool(
   }
 );
 
-// Tool 28: foto_export_vault
+// Tool 29: foto_export_vault
 server.tool(
   "foto_export_vault",
   "Export a complete offline backup archive of your Foto portfolio: downloads high-resolution 1820px photos, technical EXIF metadata JSON sidecars, and a master manifest.json index.",
@@ -849,19 +878,27 @@ server.tool(
   }
 );
 
-// Tool 29: foto_watch_directory
+// Tool 30: foto_watch_directory
 server.tool(
   "foto_watch_directory",
-  "Scan a local studio watch directory (e.g. Lightroom or Capture One export folder), auto-inspect new photo exports, extract camera EXIF, suggest curated tags, generate color-corrected preview thumbnails, and format publication drafts.",
+  "Scan a local studio watch directory (e.g. Lightroom or Capture One export folder), auto-inspect new photo exports, merge .xmp sidecar ratings/color labels, extract camera EXIF, suggest curated tags, generate color-corrected preview thumbnails, and format publication drafts.",
   {
     directoryPath: z.string().describe("Path to local directory to scan for photography exports"),
     includePreview: z.boolean().optional().describe("Whether to generate base64 multimodal preview thumbnails (default: true)"),
-    maxPhotos: z.number().int().positive().optional().describe("Maximum number of photos to scan (default: 50)")
+    maxPhotos: z.number().int().positive().optional().describe("Maximum number of photos to scan (default: 50)"),
+    minRating: z.number().int().min(1).max(5).optional().describe("Optional minimum XMP star rating filter (1 to 5)"),
+    colorLabel: z.string().optional().describe("Optional XMP color label filter (e.g. 'Select', 'Red', 'Green')")
   },
-  async ({ directoryPath, includePreview = true, maxPhotos = 50 }) => {
+  async ({ directoryPath, includePreview = true, maxPhotos = 50, minRating, colorLabel }) => {
     try {
       const watcher = new WatchFolderService(client);
-      const result = await watcher.scanWatchDirectory({ directoryPath, includePreview, maxPhotos });
+      const result = await watcher.scanWatchDirectory({
+        directoryPath,
+        includePreview,
+        maxPhotos,
+        minRating,
+        colorLabel
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
       };
@@ -874,7 +911,334 @@ server.tool(
   }
 );
 
-// MCP Resource: Official 303 Curated Allowed Tags Whitelist
+// Tool 31: foto_update_portfolio
+server.tool(
+  "foto_update_portfolio",
+  "Update an existing Foto portfolio showcase (title, description, curated tags, cover image ID, or cover horizontal alignment).",
+  {
+    postId: z.string().describe("The portfolio post ID to update"),
+    title: z.string().optional().describe("New portfolio title"),
+    description: z.string().optional().describe("New artist statement or description"),
+    tags: z.array(z.string()).optional().describe("New list of 1 to 3 curated tags"),
+    coverImageId: z.string().optional().describe("New cover image ID from the portfolio slides"),
+    coverAlignmentX: z.number().min(0).max(1).optional().describe("New horizontal cover alignment (0.0=left, 0.5=center, 1.0=right)")
+  },
+  async ({ postId, title, description, tags, coverImageId, coverAlignmentX }) => {
+    try {
+      const result = await client.updatePortfolio({
+        postId,
+        title,
+        description,
+        tags,
+        coverImageId,
+        coverAlignmentX
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to update portfolio "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 32: foto_delete_portfolio
+server.tool(
+  "foto_delete_portfolio",
+  "Delete a published portfolio showcase on Foto by post ID. Cascades cleanup across all slide private metadata, user profile postIds, and tag shards.",
+  {
+    postId: z.string().describe("The portfolio post ID to delete")
+  },
+  async ({ postId }) => {
+    try {
+      const result = await client.deletePortfolio(postId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to delete portfolio "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 33: foto_delete_comment
+server.tool(
+  "foto_delete_comment",
+  "Delete one of your comments or threaded replies on a Foto post and decrement the post comment counter.",
+  {
+    commentId: z.string().describe("The comment or reply ID to delete"),
+    postId: z.string().describe("The post ID the comment belongs to"),
+    isReply: z.boolean().optional().describe("Set to true if deleting a threaded reply from the replies collection")
+  },
+  async ({ commentId, postId, isReply = false }) => {
+    try {
+      const result = await client.deleteComment({ commentId, postId, isReply });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to delete comment "${commentId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 34: foto_get_post_likes
+server.tool(
+  "foto_get_post_likes",
+  "View the photographers who liked a specific Foto post (/app/liked-by/:postId). Resolves user IDs, usernames, display names, and profile links.",
+  {
+    postId: z.string().describe("The post ID to inspect likes for"),
+    limit: z.number().int().positive().max(50).optional().describe("Maximum user profiles to resolve (default: 25)")
+  },
+  async ({ postId, limit }) => {
+    try {
+      const result = await client.getPostLikes(postId, limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch post likes for "${postId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 35: foto_update_user_profile
+server.tool(
+  "foto_update_user_profile",
+  "Update your authenticated Foto photographer profile (displayName, bio, website, or profilePhotoUrl).",
+  {
+    displayName: z.string().optional().describe("New display name"),
+    bio: z.string().optional().describe("New biography or artist statement"),
+    website: z.string().optional().describe("Personal portfolio website URL"),
+    profilePhotoUrl: z.string().optional().describe("Profile avatar image URL")
+  },
+  async ({ displayName, bio, website, profilePhotoUrl }) => {
+    try {
+      const result = await client.updateUserProfile({
+        displayName,
+        bio,
+        website,
+        profilePhotoUrl
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to update user profile: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 36: foto_report_content
+server.tool(
+  "foto_report_content",
+  "Submit a community safety moderation report for a post or user on Foto.",
+  {
+    targetType: z.enum(["post", "user"]).describe("Whether reporting a 'post' or a 'user'"),
+    targetId: z.string().describe("The postId or userId being reported"),
+    reason: z.string().describe("Primary reason for the report (e.g. 'spam', 'ai_generated_undisclosed', 'harassment', 'copyright')"),
+    details: z.string().optional().describe("Optional additional context")
+  },
+  async ({ targetType, targetId, reason, details }) => {
+    try {
+      const result = await client.reportContent({ targetType, targetId, reason, details });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to submit content report: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 37: foto_parse_xmp
+server.tool(
+  "foto_parse_xmp",
+  "Parse an Adobe Lightroom, Capture One, or Darktable .xmp sidecar file (or find the sidecar for an image file). Extracts star ratings (xmp:Rating), color labels (xmp:Label), title, description, hierarchical keywords, copyright, lens, and Fuji film simulation recipes.",
+  {
+    filePath: z.string().describe("Absolute path to the .xmp sidecar file or its parent image file")
+  },
+  async ({ filePath }) => {
+    try {
+      const xmp = await client.parseXmp(filePath);
+      return {
+        content: [{ type: "text", text: JSON.stringify(xmp, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to parse XMP sidecar: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 38: foto_sync_vsco
+server.tool(
+  "foto_sync_vsco",
+  "Migrate and sync photo archives from a VSCO export (JSON grid/journal export) to Foto. Maps VSCO film emulation presets (e.g. A6, M5, B1, C1, HB2, KP1) to Foto's 303 curated tags, cleans descriptions, scrubs GPS, and deduplicates. Supports dryRun=true (default).",
+  {
+    exportPath: z.string().describe("Path to VSCO export directory or JSON file"),
+    mediaDir: z.string().optional().describe("Directory containing extracted VSCO images (defaults to exportPath directory)"),
+    maxPhotos: z.number().int().positive().optional().describe("Maximum photos to process in this run (default: 20)"),
+    dryRun: z.boolean().optional().describe("If true (default), simulates migration without uploading or creating live posts"),
+    defaultTags: z.array(z.string()).optional().describe("Optional default tags to apply")
+  },
+  async ({ exportPath, mediaDir, maxPhotos = 20, dryRun = true, defaultTags }) => {
+    try {
+      const vscoTool = new VscoSyncTool(client);
+      const report = await vscoTool.sync({
+        exportPath,
+        mediaDir,
+        maxPhotos,
+        dryRun,
+        defaultTags
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(report, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `VSCO sync failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 39: foto_list_profiles
+server.tool(
+  "foto_list_profiles",
+  "List all saved Foto account profiles (e.g. 'default', 'street', 'studio') and show which account is currently active.",
+  {},
+  async () => {
+    try {
+      const result = await listProfiles();
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to list profiles: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 40: foto_switch_profile
+server.tool(
+  "foto_switch_profile",
+  "Switch the active Foto account profile on the fly (e.g. between personal, street photography, and commercial studio accounts).",
+  {
+    profileName: z.string().min(1).describe("The name of the saved profile to activate")
+  },
+  async ({ profileName }) => {
+    try {
+      const result = await switchProfile(profileName);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to switch profile: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 41: foto_queue_draft
+server.tool(
+  "foto_queue_draft",
+  "Stage a validated single photo post or multi-image series into the persistent local offline draft queue for later batch publishing.",
+  {
+    filePath: z.string().optional().describe("Single photo file path (for a single post)"),
+    filePaths: z.array(z.string()).optional().describe("2 to 5 photo file paths (for a multi-image series)"),
+    caption: z.string().describe("Intended post caption"),
+    tags: z.array(z.string()).min(1).max(3).describe("1 to 3 curated tags from Foto's 303 whitelist"),
+    profileName: z.string().optional().describe("Optional account profile name to associate with this draft")
+  },
+  async ({ filePath, filePaths, caption, tags, profileName }) => {
+    try {
+      const item = await draftQueue.enqueueDraft({
+        filePath,
+        filePaths,
+        caption,
+        tags,
+        profileName
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(item, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to queue offline draft: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 42: foto_manage_draft_queue
+server.tool(
+  "foto_manage_draft_queue",
+  "List, remove, or batch-publish drafts stored in the persistent local offline draft queue.",
+  {
+    action: z.enum(["list", "publish", "remove"]).describe("Queue operation: 'list' queued drafts, 'publish' pending drafts, or 'remove' drafts"),
+    draftId: z.string().optional().describe("Optional specific draftId to publish or remove"),
+    status: z.enum(["PENDING", "PUBLISHED", "FAILED"]).optional().describe("Optional status filter when listing drafts"),
+    clearPublished: z.boolean().optional().describe("When action='remove', set true to clear all already-published drafts"),
+    clearAll: z.boolean().optional().describe("When action='remove', set true to clear the entire draft queue"),
+    maxDrafts: z.number().int().positive().optional().describe("Maximum drafts to publish in a batch (default: 20)"),
+    dryRun: z.boolean().optional().describe("When action='publish', set true to validate queued drafts without uploading")
+  },
+  async ({ action, draftId, status, clearPublished, clearAll, maxDrafts, dryRun }) => {
+    try {
+      if (action === "list") {
+        const res = await draftQueue.listDrafts({ status });
+        return {
+          content: [{ type: "text", text: JSON.stringify(res, null, 2) }]
+        };
+      }
+      if (action === "remove") {
+        const res = await draftQueue.removeDraft({ draftId, clearPublished, clearAll });
+        return {
+          content: [{ type: "text", text: JSON.stringify(res, null, 2) }]
+        };
+      }
+      const res = await draftQueue.publishQueuedDrafts({ draftId, maxDrafts, dryRun });
+      return {
+        content: [{ type: "text", text: JSON.stringify(res, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Draft queue operation "${action}" failed: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// MCP Resource 1: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",
   "foto://curated-tags",
@@ -896,7 +1260,30 @@ server.registerResource(
   }
 );
 
-// MCP Dynamic Resource: User Home Feed
+// MCP Resource 2: Authenticated User Profile
+server.registerResource(
+  "foto-my-profile",
+  "foto://my/profile",
+  {
+    title: "My Foto Photographer Profile",
+    description: "Active user's profile, bio, social counts, and published post IDs on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const profile = await client.getUserProfile();
+    return {
+      contents: [
+        {
+          uri: "foto://my/profile",
+          mimeType: "application/json",
+          text: JSON.stringify(profile, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Resource 3: User Home Feed
 server.registerResource(
   "foto-my-feed",
   "foto://my/feed",
@@ -919,7 +1306,7 @@ server.registerResource(
   }
 );
 
-// MCP Dynamic Resource: User Notifications
+// MCP Resource 4: User Notifications
 server.registerResource(
   "foto-my-notifications",
   "foto://my/notifications",
@@ -942,7 +1329,7 @@ server.registerResource(
   }
 );
 
-// MCP Dynamic Resource Template: Post Details
+// MCP Dynamic Resource Template 5: Post Details
 server.resource(
   "foto-post-detail",
   new ResourceTemplate("foto://posts/{postId}", { list: undefined }),
@@ -965,7 +1352,7 @@ server.resource(
   }
 );
 
-// MCP Dynamic Resource Template: Photographer Profile
+// MCP Dynamic Resource Template 6: Photographer Profile
 server.resource(
   "foto-user-profile",
   new ResourceTemplate("foto://users/{userId}", { list: undefined }),
@@ -988,7 +1375,31 @@ server.resource(
   }
 );
 
-// MCP Prompt: Formulate & Curate a Foto Post
+// MCP Dynamic Resource Template 7: Recent Posts by Curated Tag
+server.resource(
+  "foto-tag-recent",
+  new ResourceTemplate("foto://tags/{tag}/recent", { list: undefined }),
+  {
+    title: "Foto Recent Posts by Tag",
+    description: "Live stream of recent public posts under any of Foto's 303 curated tags",
+    mimeType: "application/json"
+  },
+  async (uri, { tag }) => {
+    const decodedTag = decodeURIComponent(String(tag));
+    const result = await client.browseTag({ tag: decodedTag, limit: 20 });
+    return {
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(result, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt 1: Formulate & Curate a Foto Post
 server.registerPrompt(
   "curate_foto_post",
   {
@@ -1017,7 +1428,7 @@ Here are the Foto guidelines to follow:
   }
 );
 
-// MCP Prompt: Masterclass Photographic Critique
+// MCP Prompt 2: Masterclass Photographic Critique
 server.registerPrompt(
   "critique_photograph",
   {
@@ -1046,7 +1457,7 @@ Analyze the photo along these masterclass dimensions:
   }
 );
 
-// MCP Prompt: Multi-Image Series Curation
+// MCP Prompt 3: Multi-Image Series Curation
 server.registerPrompt(
   "curate_photo_series",
   {
@@ -1074,7 +1485,63 @@ Guidelines:
   }
 );
 
-export { server, client };
+// MCP Prompt 4: Photo Walk Curator
+server.registerPrompt(
+  "photo_walk_curator",
+  {
+    title: "Photo Walk & Shoot Planner",
+    description: "Pre-shoot planning assistant matching camera gear, focal lengths, film stocks, and Foto curated tags to locations and lighting conditions."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please help me plan an upcoming photo walk and shoot for Foto (https://fotoapp.co/).
+
+Include the following in our plan:
+1. Gear & Focal Length Pairing: Recommend prime or zoom focal lengths suited for the environment and subject matter.
+2. Film Stock / Simulation Recipe: Suggest matching analog film stocks (e.g. Portra 400, Tri-X, HP5, CineStill 800T) or Fujifilm film simulations.
+3. Light & Timing Strategy: Identify optimal shooting windows (Golden Hour, Blue Hour, harsh midday shadows, or overcast mist).
+4. Target Foto Curated Tags: Map the planned shoot themes to 3 canonical tags from Foto's 303 allowed tags (use foto_search_tags).
+5. Post-Shoot Ingest Workflow: Outline how we will scan exports with foto_watch_directory (filtering by XMP star ratings) and queue selects with foto_queue_draft.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt 5: Daily Foto Briefing
+server.registerPrompt(
+  "daily_foto_briefing",
+  {
+    title: "Daily Foto Community Briefing",
+    description: "Generate a morning digest of new posts from followed photographers, recent notifications, and community highlights."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please prepare my Daily Foto Community Briefing:
+
+1. Check Session & Profile: Run foto_auth_status and foto_get_user_profile.
+2. Home Timeline Highlights: Run foto_get_home_feed to summarize the latest works published by photographers I follow, noting standout compositions, subjects, and tags.
+3. Community Interactions: Run foto_get_notifications to summarize recent likes, comments, replies, and new followers.
+4. Thoughtful Engagement: Recommend 1 or 2 posts from my feed where I can leave a meaningful, craft-focused comment using foto_post_comment.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+export { server, client, draftQueue };
 
 async function main() {
   const args = process.argv.slice(2);
@@ -1084,34 +1551,55 @@ async function main() {
   if (isSse) {
     const { SSEServerTransport } = await import("@modelcontextprotocol/sdk/server/sse.js");
     const http = await import("node:http");
-    const port = Number(process.env.PORT) || 3000;
+    const portArgIdx = args.indexOf("--port");
+    const port = (portArgIdx !== -1 && args[portArgIdx + 1])
+      ? Number(args[portArgIdx + 1])
+      : Number(process.env.MCP_PORT || process.env.PORT) || 3000;
 
-    let sseTransport: any = null;
+    const activeTransports = new Map<string, any>();
 
     const serverHttp = http.createServer(async (req, res) => {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       if (url.pathname === "/sse") {
-        sseTransport = new SSEServerTransport("/messages", res);
+        const sseTransport = new SSEServerTransport("/messages", res);
+        const sessionId = (sseTransport as any).sessionId || "default";
+        activeTransports.set(sessionId, sseTransport);
+        res.on("close", () => {
+          activeTransports.delete(sessionId);
+        });
         await server.connect(sseTransport);
       } else if (url.pathname === "/messages" && req.method === "POST") {
-        if (sseTransport) {
-          await sseTransport.handlePostMessage(req, res);
+        const sessionId = url.searchParams.get("sessionId");
+        const transport = (sessionId && activeTransports.get(sessionId))
+          || Array.from(activeTransports.values())[0];
+        if (transport) {
+          await transport.handlePostMessage(req, res);
         } else {
           res.writeHead(400).end("No active SSE transport connection");
         }
       } else {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ name: "foto_mcp", version: "2.0.0", status: "running" }));
+        res.end(
+          JSON.stringify({
+            name: "foto_mcp",
+            version: "3.0.0",
+            status: "running",
+            toolsCount: 42,
+            resourcesCount: 7,
+            promptsCount: 5,
+            activeSseSessions: activeTransports.size
+          })
+        );
       }
     });
 
     serverHttp.listen(port, () => {
-      console.error(`Foto MCP Server running on SSE transport at http://localhost:${port}/sse`);
+      console.error(`Foto MCP Server v3.0.0 running on SSE transport at http://localhost:${port}/sse`);
     });
   } else {
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.error("Foto MCP Server running on stdio transport.");
+    console.error("Foto MCP Server v3.0.0 running on stdio transport.");
   }
 }
 

@@ -721,7 +721,8 @@ export async function unfollowUserInFirestore(params: {
 }
 
 /**
- * Deletes a post document, cleans up associated private metadata, and removes postId from user profile.
+ * Deletes a post document, cleans up associated private metadata (including series/portfolio slides),
+ * removes postId from user profile, and prunes tag_index shards.
  */
 export async function deletePostFromFirestore(params: {
   postId: string;
@@ -730,14 +731,24 @@ export async function deletePostFromFirestore(params: {
 }): Promise<boolean> {
   const { postId, userId, idToken } = params;
 
-  // 1. Fetch post doc to find associated privateMetadataId
+  // 1. Fetch post doc to find associated privateMetadataId(s) and tags
   const postDoc = await getFirestoreDocument({
     collectionPath: "posts",
     documentId: postId,
     idToken
   });
 
-  const privateMetadataId = postDoc?.privateMetadataId;
+  const metadataIds = new Set<string>();
+  if (postDoc?.privateMetadataId && typeof postDoc.privateMetadataId === "string") {
+    metadataIds.add(postDoc.privateMetadataId);
+  }
+  if (Array.isArray(postDoc?.images)) {
+    for (const img of postDoc.images) {
+      if (img?.privateMetadataId && typeof img.privateMetadataId === "string") {
+        metadataIds.add(img.privateMetadataId);
+      }
+    }
+  }
 
   // 2. Delete posts/{postId}
   await deleteFirestoreDocument({
@@ -746,12 +757,12 @@ export async function deletePostFromFirestore(params: {
     idToken
   });
 
-  // 3. Delete image-private-metadata if present
-  if (privateMetadataId) {
+  // 3. Delete all image-private-metadata documents (single + series/portfolio slides)
+  for (const metaId of metadataIds) {
     try {
       await deleteFirestoreDocument({
         collectionPath: "image-private-metadata",
-        documentId: privateMetadataId,
+        documentId: metaId,
         idToken
       });
     } catch {
@@ -790,6 +801,43 @@ export async function deletePostFromFirestore(params: {
     });
   } catch {
     // Non-fatal if profile update fails
+  }
+
+  // 5. Remove postId from tag_index shards if tags are present on the post
+  if (Array.isArray(postDoc?.tags) && postDoc.tags.length > 0) {
+    for (const tag of postDoc.tags) {
+      try {
+        const meta = await fetchTagIndexMeta({ tag, idToken });
+        const shard = meta?.currentShard ?? 0;
+        const shardDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/tag_index/${tag}_${shard}`;
+        await fetch(commitUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            writes: [
+              {
+                transform: {
+                  document: shardDocPath,
+                  fieldTransforms: [
+                    {
+                      fieldPath: "posts",
+                      removeAllFromArray: {
+                        values: [{ stringValue: postId }]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          })
+        });
+      } catch {
+        // Non-fatal shard prune
+      }
+    }
   }
 
   return true;
@@ -971,12 +1019,13 @@ export async function unlikePostInFirestore(params: {
 }
 
 /**
- * Fetches comments for a specific post.
+ * Fetches comments and optional threaded replies for a specific post.
  */
 export async function fetchPostComments(params: {
   postId: string;
   idToken: string;
   limit?: number;
+  includeReplies?: boolean;
 }): Promise<Array<Record<string, any>>> {
   const queryUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery`;
   const limit = Math.min(params.limit || 20, 50);
@@ -1017,21 +1066,78 @@ export async function fetchPostComments(params: {
       comments.push(commentData);
     }
   }
+
+  if (params.includeReplies && comments.length > 0) {
+    try {
+      const replyRes = await fetch(queryUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.idToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: "replies" }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: "postId" },
+                op: "EQUAL",
+                value: { stringValue: params.postId }
+              }
+            },
+            limit: 100
+          }
+        })
+      });
+
+      if (replyRes.ok) {
+        const replyRows = (await replyRes.json()) as any[];
+        if (Array.isArray(replyRows)) {
+          const repliesByParent = new Map<string, Array<Record<string, any>>>();
+          for (const rRow of replyRows) {
+            if (rRow.document?.fields) {
+              const rData: Record<string, any> = {};
+              for (const [k, v] of Object.entries(rRow.document.fields)) {
+                rData[k] = fromFirestoreValue(v as any);
+              }
+              rData.replyId = rRow.document.name.split("/").pop();
+              const parentId = rData.parentCommentId || rData.commentId || "";
+              if (!repliesByParent.has(parentId)) {
+                repliesByParent.set(parentId, []);
+              }
+              repliesByParent.get(parentId)!.push(rData);
+            }
+          }
+          for (const c of comments) {
+            c.replies = repliesByParent.get(c.commentId) || [];
+          }
+        }
+      }
+    } catch {
+      // Non-fatal if replies query fails
+    }
+  }
+
   return comments;
 }
 
 /**
- * Adds a new comment to a post and increments the post's commentCount.
+ * Adds a new comment (or threaded reply if parentCommentId is provided) to a post
+ * and increments the post's commentCount.
  */
 export async function addPostComment(params: {
   postId: string;
   userId: string;
   username?: string;
   text: string;
+  parentCommentId?: string;
   idToken: string;
 }): Promise<Record<string, any>> {
   const commentId = crypto.randomUUID();
-  const commentData = {
+  const isReply = Boolean(params.parentCommentId);
+  const collectionPath = isReply ? "replies" : "comments";
+
+  const commentData: Record<string, any> = {
     commentId,
     postId: params.postId,
     userId: params.userId,
@@ -1040,8 +1146,13 @@ export async function addPostComment(params: {
     createdAt: new Date().toISOString()
   };
 
+  if (params.parentCommentId) {
+    commentData.parentCommentId = params.parentCommentId;
+    commentData.replyId = commentId;
+  }
+
   await setFirestoreDocument({
-    collectionPath: "comments",
+    collectionPath,
     documentId: commentId,
     data: commentData,
     idToken: params.idToken
@@ -1078,6 +1189,283 @@ export async function addPostComment(params: {
   }
 
   return commentData;
+}
+
+/**
+ * Deletes a comment or threaded reply and decrements the post's commentCount.
+ */
+export async function deleteCommentFromFirestore(params: {
+  commentId: string;
+  postId: string;
+  userId: string;
+  isReply?: boolean;
+  idToken: string;
+}): Promise<boolean> {
+  const collectionPath = params.isReply ? "replies" : "comments";
+  const existing = await getFirestoreDocument({
+    collectionPath,
+    documentId: params.commentId,
+    idToken: params.idToken
+  });
+
+  if (existing && existing.userId && existing.userId !== params.userId) {
+    throw new Error("Permission denied: You can only delete your own comments.");
+  }
+
+  const deleted = await deleteFirestoreDocument({
+    collectionPath,
+    documentId: params.commentId,
+    idToken: params.idToken
+  });
+
+  if (deleted && params.postId) {
+    try {
+      const commitUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:commit`;
+      const postDocPath = `projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents/posts/${params.postId}`;
+      await fetch(commitUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${params.idToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          writes: [
+            {
+              transform: {
+                document: postDocPath,
+                fieldTransforms: [
+                  {
+                    fieldPath: "commentCount",
+                    increment: { integerValue: "-1" }
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      });
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  return deleted;
+}
+
+/**
+ * Resolves the photographer profiles of users who liked a post (/app/liked-by/:postId).
+ */
+export async function fetchPostLikesUsers(params: {
+  postId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<{
+  postId: string;
+  totalLikes: number;
+  users: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    profilePhotoUrl: string | null;
+    profileUrl: string;
+  }>;
+}> {
+  const postDoc = await fetchPostDocument({ postId: params.postId, idToken: params.idToken });
+  if (!postDoc) {
+    throw new Error(`Post "${params.postId}" not found.`);
+  }
+
+  const likeUserIds: string[] = Array.isArray(postDoc.likes) ? postDoc.likes : [];
+  const limit = Math.min(params.limit || 25, 50);
+  const selectedIds = likeUserIds.slice(0, limit);
+
+  const users = await Promise.all(
+    selectedIds.map(async (uid) => {
+      let profile: Record<string, any> | null = null;
+      try {
+        profile = await fetchUserProfile({ userId: uid, idToken: params.idToken });
+      } catch {
+        // Ignore single fetch error
+      }
+      const username = profile?.username || `user_${uid.substring(0, 8)}`;
+      return {
+        userId: uid,
+        username,
+        displayName: profile?.displayName || profile?.name || username,
+        profilePhotoUrl: profile?.profilePhotoUrl || profile?.avatarUrl || null,
+        profileUrl: `https://the.fotoapp.co/app/profile?userId=${uid}`
+      };
+    })
+  );
+
+  return {
+    postId: params.postId,
+    totalLikes: likeUserIds.length,
+    users
+  };
+}
+
+/**
+ * Updates an existing portfolio document in Firestore.
+ */
+export async function updatePortfolioInFirestore(params: {
+  postId: string;
+  userId: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  coverImageId?: string;
+  coverAlignmentX?: number;
+  images?: PortfolioImageRecord[];
+  idToken: string;
+}): Promise<Record<string, any>> {
+  const { postId, userId, title, description, tags, coverImageId, coverAlignmentX, images, idToken } = params;
+
+  const current = await getFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    idToken
+  });
+
+  if (!current) {
+    throw new Error(`Portfolio "${postId}" not found.`);
+  }
+
+  if (current.type && current.type !== "portfolio") {
+    throw new Error(`Post "${postId}" is not a portfolio (type="${current.type}").`);
+  }
+
+  if (current.userId && current.userId !== userId) {
+    throw new Error("Permission denied: You can only edit your own portfolios.");
+  }
+
+  const updated: Record<string, any> = { ...current };
+  if (title !== undefined) updated.title = title.trim();
+  if (description !== undefined) updated.description = description.trim();
+  if (tags !== undefined) updated.tags = tags;
+  if (coverImageId !== undefined) updated.coverImageId = coverImageId;
+  if (coverAlignmentX !== undefined) updated.coverAlignmentX = Math.min(Math.max(coverAlignmentX, 0), 1);
+  if (images !== undefined) updated.images = images;
+
+  await setFirestoreDocument({
+    collectionPath: "posts",
+    documentId: postId,
+    data: updated,
+    idToken
+  });
+
+  if (tags && tags.length > 0) {
+    await indexPostTags({ postId, tags, idToken });
+  }
+
+  return updated;
+}
+
+/**
+ * Deletes a portfolio document and cascades cleanup across all slide private metadata, user profile, and tag shards.
+ */
+export async function deletePortfolioFromFirestore(params: {
+  postId: string;
+  userId: string;
+  idToken: string;
+}): Promise<boolean> {
+  return await deletePostFromFirestore(params);
+}
+
+/**
+ * Updates the authenticated user's profile fields (displayName, bio, website, profilePhotoUrl).
+ */
+export async function updateUserProfileInFirestore(params: {
+  userId: string;
+  displayName?: string;
+  bio?: string;
+  website?: string;
+  profilePhotoUrl?: string;
+  idToken: string;
+}): Promise<Record<string, any>> {
+  const { userId, displayName, bio, website, profilePhotoUrl, idToken } = params;
+
+  const current = (await fetchUserProfile({ userId, idToken })) || { userId };
+  const updated: Record<string, any> = { ...current };
+
+  if (displayName !== undefined) updated.displayName = displayName.trim();
+  if (bio !== undefined) updated.bio = bio.trim();
+  if (website !== undefined) updated.website = website.trim();
+  if (profilePhotoUrl !== undefined) updated.profilePhotoUrl = profilePhotoUrl.trim();
+
+  await setFirestoreDocument({
+    collectionPath: "user-profiles",
+    documentId: userId,
+    data: updated,
+    idToken
+  });
+
+  return updated;
+}
+
+/**
+ * Submits a community safety report to `reported-posts` or `reported-users`.
+ */
+export async function reportContentInFirestore(params: {
+  reporterUserId: string;
+  targetType: "post" | "user";
+  targetId: string;
+  reason: string;
+  details?: string;
+  idToken: string;
+}): Promise<Record<string, any>> {
+  const reportId = crypto.randomUUID();
+  const collectionPath = params.targetType === "post" ? "reported-posts" : "reported-users";
+
+  const reportData: Record<string, any> = {
+    reportId,
+    reporterUserId: params.reporterUserId,
+    targetType: params.targetType,
+    targetId: params.targetId,
+    reason: params.reason.trim(),
+    details: params.details?.trim() || "",
+    status: "pending",
+    createdAt: new Date().toISOString()
+  };
+
+  if (params.targetType === "post") {
+    reportData.postId = params.targetId;
+  } else {
+    reportData.reportedUserId = params.targetId;
+  }
+
+  await setFirestoreDocument({
+    collectionPath,
+    documentId: reportId,
+    data: reportData,
+    idToken: params.idToken
+  });
+
+  return reportData;
+}
+
+/**
+ * Executes an HTTP fetch with courteous exponential backoff on transient rate-limit (429) or server (502/503/504) errors.
+ */
+export async function fetchWithRetry(
+  url: string,
+  init?: RequestInit,
+  options?: { maxRetries?: number; baseDelayMs?: number }
+): Promise<Response> {
+  const maxRetries = options?.maxRetries ?? 2;
+  const baseDelayMs = options?.baseDelayMs ?? 150;
+
+  let lastResponse: Response | undefined;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, init);
+    if (![429, 502, 503, 504].includes(res.status) || attempt === maxRetries) {
+      return res;
+    }
+    lastResponse = res;
+    const delay = baseDelayMs * Math.pow(2, attempt);
+    await new Promise(resolve => setTimeout(resolve, delay));
+  }
+  return lastResponse!;
 }
 
 /**
@@ -1312,4 +1700,5 @@ export async function fetchUserPortfolios(params: {
   const max = params.limit || 20;
   return portfolios.slice(0, max);
 }
+
 

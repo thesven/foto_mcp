@@ -462,6 +462,174 @@ export async function runMcpServerTests() {
     const watchFail = await tools.foto_watch_directory.handler({ directoryPath: "/no/dir/here" }, {} as any);
     assert.strictEqual(watchFail.isError, true);
 
+    // 33. v3.0.0 Tools: foto_update_portfolio & foto_delete_portfolio
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/port_mcp_edit") && (!init?.method || init?.method === "GET")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              postId: { stringValue: "port_mcp_edit" },
+              userId: { stringValue: "u_browse" },
+              type: { stringValue: "portfolio" },
+              title: { stringValue: "Old MCP Portfolio" }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ name: "ok" }), { status: 200 });
+    };
+
+    const upPortMcp = await tools.foto_update_portfolio.handler(
+      { postId: "port_mcp_edit", title: "Renamed Portfolio", tags: ["Street"] },
+      {} as any
+    );
+    assert(!upPortMcp.isError);
+    assert(upPortMcp.content[0].text.includes("Successfully updated portfolio"));
+
+    const delPortMcp = await tools.foto_delete_portfolio.handler({ postId: "port_mcp_edit" }, {} as any);
+    assert(!delPortMcp.isError);
+    assert(delPortMcp.content[0].text.includes("Successfully deleted portfolio"));
+
+    // 34. v3.0.0 Tools: foto_delete_comment & foto_get_post_likes
+    globalThis.fetch = async (url: any, init: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("comments/c_mcp_1") && (!init?.method || init?.method === "GET")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_browse" }, postId: { stringValue: "p1" } } }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const delComMcp = await tools.foto_delete_comment.handler({ commentId: "c_mcp_1", postId: "p1" }, {} as any);
+    assert(!delComMcp.isError);
+    assert(delComMcp.content[0].text.includes("Successfully deleted"));
+
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("posts/p_mcp_likes")) {
+        return new Response(JSON.stringify({ fields: { likes: { arrayValue: { values: [{ stringValue: "u_fan" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_fan")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "fan_mcp" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const likesMcp = await tools.foto_get_post_likes.handler({ postId: "p_mcp_likes" }, {} as any);
+    assert(!likesMcp.isError);
+    assert(likesMcp.content[0].text.includes("fan_mcp"));
+
+    // 35. v3.0.0 Tools: foto_update_user_profile & foto_report_content
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { username: { stringValue: "u_browse" }, bio: { stringValue: "Updated via MCP" } } }), { status: 200 });
+    const upProfMcp = await tools.foto_update_user_profile.handler({ bio: "Updated via MCP" }, {} as any);
+    assert(!upProfMcp.isError);
+    assert(upProfMcp.content[0].text.includes("Updated via MCP"));
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ name: "rep_mcp" }), { status: 200 });
+    const repMcp = await tools.foto_report_content.handler({ targetType: "post", targetId: "p_bad", reason: "Spam" }, {} as any);
+    assert(!repMcp.isError);
+    assert(repMcp.content[0].text.includes("Submitted post safety report"));
+
+    // 36. v3.0.0 Tools: foto_parse_xmp & foto_sync_vsco
+    const mcpXmpFile = path.join(tempDir, "sample.xmp");
+    await fs.writeFile(
+      mcpXmpFile,
+      `<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmp:Rating="4" xmp:Label="Blue"/></rdf:RDF></x:xmpmeta>`,
+      "utf-8"
+    );
+    const parseXmpMcp = await tools.foto_parse_xmp.handler({ filePath: mcpXmpFile }, {} as any);
+    assert(!parseXmpMcp.isError);
+    assert(parseXmpMcp.content[0].text.includes("Blue"));
+
+    const vscoExportFile = path.join(tempDir, "vsco_export.json");
+    await fs.writeFile(vscoExportFile, JSON.stringify([{ id: "v1", preset: "A6", description: "Street frame", file: "sample.jpg" }]), "utf-8");
+    const vscoMcp = await tools.foto_sync_vsco.handler({ exportPath: vscoExportFile, mediaDir: tempDir, dryRun: true }, {} as any);
+    assert(!vscoMcp.isError);
+    assert(vscoMcp.content[0].text.includes("Analog"));
+
+    // 37. v3.0.0 Tools: foto_list_profiles, foto_switch_profile, foto_queue_draft, foto_manage_draft_queue
+    const listProfMcp = await tools.foto_list_profiles.handler({}, {} as any);
+    assert(!listProfMcp.isError);
+    assert(listProfMcp.content[0].text.includes("activeProfile"));
+
+    const switchFailMcp = await tools.foto_switch_profile.handler({ profileName: "nonexistent_prof" }, {} as any);
+    assert.strictEqual(switchFailMcp.isError, true);
+
+    const queueDraftMcp = await tools.foto_queue_draft.handler(
+      { filePath: testImg, caption: "Queued via MCP", tags: ["Street"] },
+      {} as any
+    );
+    assert(!queueDraftMcp.isError);
+    assert(queueDraftMcp.content[0].text.includes("Queued via MCP"));
+
+    const listQueueMcp = await tools.foto_manage_draft_queue.handler({ action: "list" }, {} as any);
+    assert(!listQueueMcp.isError);
+    assert(listQueueMcp.content[0].text.includes("Queued via MCP"));
+
+    const pubQueueDryMcp = await tools.foto_manage_draft_queue.handler({ action: "publish", dryRun: true }, {} as any);
+    assert(!pubQueueDryMcp.isError);
+    assert(pubQueueDryMcp.content[0].text.includes("processed"));
+
+    // 38. v3.0.0 Resources: foto://my/profile and foto://tags/{tag}/recent
+    const myProfileResource = resources["foto://my/profile"];
+    assert(myProfileResource, "foto://my/profile resource must be registered");
+    globalThis.fetch = async () => new Response(JSON.stringify({ fields: { username: { stringValue: "my_mcp_prof" } } }), { status: 200 });
+    const myProfRes = await myProfileResource.readCallback(new URL("foto://my/profile"), {} as any);
+    assert(myProfRes.contents[0].text.includes("my_mcp_prof"));
+
+    const tagRecentTemplate = resourceTemplates["foto-tag-recent"];
+    assert(tagRecentTemplate, "foto-tag-recent template must be registered");
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("Street_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "st_1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/st_1")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "st_1" }, userId: { stringValue: "u1" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const tagRecentRes = await tagRecentTemplate.readCallback(new URL("foto://tags/Street/recent"), { tag: "Street" } as any, {} as any);
+    assert(tagRecentRes.contents[0].text.includes("st_1"));
+
+    // 39. v3.0.0 Prompts: photo_walk_curator and daily_foto_briefing
+    const walkPrompt = prompts["photo_walk_curator"];
+    assert(walkPrompt, "photo_walk_curator prompt must be registered");
+    const walkPromptRes = await walkPrompt.callback({}, {} as any);
+    assert(walkPromptRes.messages[0].content.text.includes("foto_watch_directory"));
+
+    const briefingPrompt = prompts["daily_foto_briefing"];
+    assert(briefingPrompt, "daily_foto_briefing prompt must be registered");
+    const briefingPromptRes = await briefingPrompt.callback({}, {} as any);
+    assert(briefingPromptRes.messages[0].content.text.includes("Daily Foto Community Briefing"));
+
+    // Additional error/remove branches for v3.0.0 tools
+    const removeQueueMcp = await tools.foto_manage_draft_queue.handler({ action: "remove", clearAll: true }, {} as any);
+    assert(!removeQueueMcp.isError);
+
+    const upPortFailMcp = await tools.foto_update_portfolio.handler({ postId: "" }, {} as any);
+    assert.strictEqual(upPortFailMcp.isError, true);
+
+    const delPortFailMcp = await tools.foto_delete_portfolio.handler({ postId: "" }, {} as any);
+    assert.strictEqual(delPortFailMcp.isError, true);
+
+    const delComFailMcp = await tools.foto_delete_comment.handler({ commentId: "", postId: "p1" }, {} as any);
+    assert.strictEqual(delComFailMcp.isError, true);
+
+    const likesFailMcp = await tools.foto_get_post_likes.handler({ postId: "" }, {} as any);
+    assert.strictEqual(likesFailMcp.isError, true);
+
+    const repFailMcp = await tools.foto_report_content.handler({ targetType: "post", targetId: "", reason: "" }, {} as any);
+    assert.strictEqual(repFailMcp.isError, true);
+
+    const xmpFailMcp = await tools.foto_parse_xmp.handler({ filePath: "/nonexistent/sidecar.xmp" }, {} as any);
+    assert.strictEqual(xmpFailMcp.isError, true);
+
+    const vscoFailMcp = await tools.foto_sync_vsco.handler({ exportPath: "/nonexistent/vsco.json" }, {} as any);
+    assert.strictEqual(vscoFailMcp.isError, true);
+
+    const queueFailMcp = await tools.foto_queue_draft.handler({ caption: "No file", tags: ["Street"] }, {} as any);
+    assert.strictEqual(queueFailMcp.isError, true);
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });

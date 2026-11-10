@@ -1,5 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
 import { FOTO_FIREBASE_CONFIG, CONFIG_PATHS } from "../config.js";
 
 export interface StoredCredentials {
@@ -8,58 +10,302 @@ export interface StoredCredentials {
   idToken: string;
   refreshToken: string;
   expiresAt: number; // Unix timestamp ms
+  profileName?: string;
 }
 
 export interface AuthStatus {
   loggedIn: boolean;
+  activeProfile: string;
   email?: string;
   userId?: string;
   expiresInMinutes?: number;
+  encryptedAtRest?: boolean;
   message?: string;
 }
 
-let inMemoryCredentials: StoredCredentials | null = null;
+export interface ProfileSummary {
+  profileName: string;
+  active: boolean;
+  userId: string;
+  email?: string;
+  expiresInMinutes: number;
+  loggedIn: boolean;
+}
+
+interface ProfilesRegistry {
+  activeProfile: string;
+  profiles: Record<string, StoredCredentials | { __encrypted: string }>;
+}
+
+let activeProfileName = "default";
+const inMemoryProfiles = new Map<string, StoredCredentials>();
 
 async function ensureConfigDir(): Promise<void> {
   await fs.mkdir(CONFIG_PATHS.configDir, { recursive: true, mode: 0o700 });
 }
 
-export async function loadStoredCredentials(): Promise<StoredCredentials | null> {
-  if (inMemoryCredentials) {
-    return inMemoryCredentials;
+/**
+ * Derives a deterministic 32-byte AES-256 key from FOTO_MASTER_KEY or host/user identity
+ */
+function deriveEncryptionKey(): Buffer {
+  const secret = process.env.FOTO_MASTER_KEY || `foto-mcp-v3-${os.hostname()}-${os.userInfo().username}`;
+  return crypto.scryptSync(secret, "foto-mcp-salt-v3", 32);
+}
+
+/**
+ * Encrypts a credential payload using AES-256-GCM
+ */
+export function encryptCredentialsPayload(creds: StoredCredentials): string {
+  const key = deriveEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = JSON.stringify(creds);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${authTag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+/**
+ * Decrypts an AES-256-GCM credential payload
+ */
+export function decryptCredentialsPayload(payload: string): StoredCredentials | null {
+  try {
+    const parts = payload.split(":");
+    if (parts.length !== 3) return null;
+    const [ivHex, tagHex, dataHex] = parts;
+    const key = deriveEncryptionKey();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
+    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(dataHex, "hex")),
+      decipher.final()
+    ]);
+    return JSON.parse(decrypted.toString("utf8")) as StoredCredentials;
+  } catch {
+    return null;
+  }
+}
+
+async function readProfilesRegistry(): Promise<ProfilesRegistry> {
+  try {
+    const raw = await fs.readFile(CONFIG_PATHS.profilesFile, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.profiles) {
+      return {
+        activeProfile: parsed.activeProfile || "default",
+        profiles: parsed.profiles
+      };
+    }
+  } catch {
+    // Fallback to legacy credentials.json if present
   }
 
   try {
-    const raw = await fs.readFile(CONFIG_PATHS.credentialsFile, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.idToken && parsed.userId) {
-      inMemoryCredentials = parsed;
-      return parsed;
+    const legacyRaw = await fs.readFile(CONFIG_PATHS.credentialsFile, "utf-8");
+    const legacyParsed = JSON.parse(legacyRaw);
+    if (legacyParsed && legacyParsed.idToken && legacyParsed.userId) {
+      return {
+        activeProfile: "default",
+        profiles: {
+          default: legacyParsed
+        }
+      };
     }
-  } catch (err) {
-    // File doesn't exist or is invalid
+  } catch {
+    // Ignore
+  }
+
+  return {
+    activeProfile: activeProfileName || "default",
+    profiles: {}
+  };
+}
+
+async function writeProfilesRegistry(registry: ProfilesRegistry): Promise<void> {
+  await ensureConfigDir();
+  await fs.writeFile(
+    CONFIG_PATHS.profilesFile,
+    JSON.stringify(registry, null, 2),
+    { encoding: "utf-8", mode: 0o600 }
+  );
+}
+
+export function getActiveProfileName(): string {
+  return activeProfileName;
+}
+
+export async function loadStoredCredentials(profileName?: string): Promise<StoredCredentials | null> {
+  const targetProfile = profileName || activeProfileName || "default";
+
+  if (inMemoryProfiles.has(targetProfile)) {
+    return inMemoryProfiles.get(targetProfile)!;
+  }
+
+  const registry = await readProfilesRegistry();
+  if (!profileName && registry.activeProfile) {
+    activeProfileName = registry.activeProfile;
+  }
+  const effectiveProfile = profileName || activeProfileName || "default";
+
+  const entry = registry.profiles[effectiveProfile];
+  if (entry) {
+    if ("__encrypted" in entry && typeof entry.__encrypted === "string") {
+      const decrypted = decryptCredentialsPayload(entry.__encrypted);
+      if (decrypted && decrypted.idToken && decrypted.userId) {
+        decrypted.profileName = effectiveProfile;
+        inMemoryProfiles.set(effectiveProfile, decrypted);
+        return decrypted;
+      }
+    } else if ("idToken" in entry && "userId" in entry) {
+      const creds = { ...entry, profileName: effectiveProfile };
+      inMemoryProfiles.set(effectiveProfile, creds);
+      return creds;
+    }
   }
 
   return null;
 }
 
-export async function saveCredentials(creds: StoredCredentials): Promise<void> {
-  inMemoryCredentials = creds;
+export async function saveCredentials(creds: StoredCredentials, profileName?: string): Promise<void> {
+  const targetProfile = (profileName || creds.profileName || activeProfileName || "default").trim();
+  const normalizedCreds: StoredCredentials = {
+    ...creds,
+    profileName: targetProfile
+  };
+
+  activeProfileName = targetProfile;
+  inMemoryProfiles.set(targetProfile, normalizedCreds);
+
   await ensureConfigDir();
+
+  // Maintain legacy credentials.json for backward compatibility
+  await fs.writeFile(
+    CONFIG_PATHS.credentialsFile,
+    JSON.stringify(normalizedCreds, null, 2),
+    { encoding: "utf-8", mode: 0o600 }
+  );
+
+  // Also persist AES-256-GCM encrypted entry in profiles.json
+  const registry = await readProfilesRegistry();
+  registry.activeProfile = targetProfile;
+  registry.profiles[targetProfile] = {
+    __encrypted: encryptCredentialsPayload(normalizedCreds)
+  };
+  await writeProfilesRegistry(registry);
+}
+
+export async function clearCredentials(profileName?: string): Promise<void> {
+  if (profileName) {
+    const target = profileName.trim();
+    inMemoryProfiles.delete(target);
+    const registry = await readProfilesRegistry();
+    delete registry.profiles[target];
+    if (registry.activeProfile === target) {
+      const remaining = Object.keys(registry.profiles);
+      registry.activeProfile = remaining[0] || "default";
+      activeProfileName = registry.activeProfile;
+    }
+    await writeProfilesRegistry(registry);
+    if (target === "default") {
+      try {
+        await fs.unlink(CONFIG_PATHS.credentialsFile);
+      } catch {
+        // Ignore
+      }
+    }
+    return;
+  }
+
+  inMemoryProfiles.clear();
+  activeProfileName = "default";
+  try {
+    await fs.unlink(CONFIG_PATHS.credentialsFile);
+  } catch {
+    // Ignore if already deleted
+  }
+  try {
+    await fs.unlink(CONFIG_PATHS.profilesFile);
+  } catch {
+    // Ignore if already deleted
+  }
+}
+
+/**
+ * Lists all saved Foto account profiles and their session statuses.
+ */
+export async function listProfiles(): Promise<{
+  activeProfile: string;
+  profiles: ProfileSummary[];
+}> {
+  const registry = await readProfilesRegistry();
+  const currentActive = activeProfileName || registry.activeProfile || "default";
+  const profiles: ProfileSummary[] = [];
+
+  const profileNames = new Set<string>([
+    ...Object.keys(registry.profiles),
+    ...Array.from(inMemoryProfiles.keys())
+  ]);
+
+  for (const name of profileNames) {
+    const creds = await loadStoredCredentials(name);
+    if (creds) {
+      const remainingMs = creds.expiresAt - Date.now();
+      const expiresInMinutes = Math.max(0, Math.round(remainingMs / 60000));
+      profiles.push({
+        profileName: name,
+        active: name === currentActive,
+        userId: creds.userId,
+        email: creds.email,
+        expiresInMinutes,
+        loggedIn: remainingMs > 0 || Boolean(creds.refreshToken)
+      });
+    }
+  }
+
+  return {
+    activeProfile: currentActive,
+    profiles
+  };
+}
+
+/**
+ * Switches the active Foto account profile.
+ */
+export async function switchProfile(profileName: string): Promise<{
+  success: boolean;
+  activeProfile: string;
+  userId: string;
+  email?: string;
+  message: string;
+}> {
+  if (!profileName || typeof profileName !== "string" || !profileName.trim()) {
+    throw new Error("Profile name is required.");
+  }
+  const target = profileName.trim();
+  const creds = await loadStoredCredentials(target);
+  if (!creds) {
+    throw new Error(`Profile "${target}" not found. Use foto_login with profileName="${target}" to add it first.`);
+  }
+
+  activeProfileName = target;
+  const registry = await readProfilesRegistry();
+  registry.activeProfile = target;
+  await writeProfilesRegistry(registry);
+
+  // Sync active credentials to credentials.json
   await fs.writeFile(
     CONFIG_PATHS.credentialsFile,
     JSON.stringify(creds, null, 2),
     { encoding: "utf-8", mode: 0o600 }
   );
-}
 
-export async function clearCredentials(): Promise<void> {
-  inMemoryCredentials = null;
-  try {
-    await fs.unlink(CONFIG_PATHS.credentialsFile);
-  } catch (err) {
-    // Ignore if already deleted
-  }
+  return {
+    success: true,
+    activeProfile: target,
+    userId: creds.userId,
+    email: creds.email,
+    message: `Switched active Foto profile to "${target}" (${creds.email || creds.userId}).`
+  };
 }
 
 /**
@@ -67,10 +313,12 @@ export async function clearCredentials(): Promise<void> {
  */
 export async function signInWithEmailAndPassword(
   email?: string,
-  password?: string
+  password?: string,
+  profileName?: string
 ): Promise<StoredCredentials> {
   const finalEmail = email || process.env.FOTO_EMAIL;
   const finalPassword = password || process.env.FOTO_PASSWORD;
+  const targetProfile = (profileName || activeProfileName || "default").trim();
 
   if (!finalEmail || !finalPassword) {
     throw new Error(
@@ -106,17 +354,18 @@ export async function signInWithEmailAndPassword(
     userId: data.localId,
     idToken: data.idToken,
     refreshToken: data.refreshToken,
-    expiresAt: Date.now() + (expiresInSec - 60) * 1000 // Buffer 60 seconds
+    expiresAt: Date.now() + (expiresInSec - 60) * 1000, // Buffer 60 seconds
+    profileName: targetProfile
   };
 
-  await saveCredentials(creds);
+  await saveCredentials(creds, targetProfile);
   return creds;
 }
 
 /**
  * Refresh an existing expired ID token using the refreshToken
  */
-export async function refreshIdToken(refreshToken: string): Promise<StoredCredentials> {
+export async function refreshIdToken(refreshToken: string, profileName?: string): Promise<StoredCredentials> {
   const endpoint = `https://securetoken.googleapis.com/v1/token?key=${FOTO_FIREBASE_CONFIG.apiKey}`;
 
   const res = await fetch(endpoint, {
@@ -134,7 +383,8 @@ export async function refreshIdToken(refreshToken: string): Promise<StoredCreden
     throw new Error(`Failed to refresh Foto token: ${data.error?.message || "Token refresh error"}`);
   }
 
-  const current = (await loadStoredCredentials()) || {
+  const targetProfile = profileName || activeProfileName || "default";
+  const current = (await loadStoredCredentials(targetProfile)) || {
     email: undefined,
     userId: data.user_id,
     refreshToken: data.refresh_token
@@ -146,23 +396,25 @@ export async function refreshIdToken(refreshToken: string): Promise<StoredCreden
     userId: data.user_id,
     idToken: data.id_token,
     refreshToken: data.refresh_token,
-    expiresAt: Date.now() + (expiresInSec - 60) * 1000
+    expiresAt: Date.now() + (expiresInSec - 60) * 1000,
+    profileName: targetProfile
   };
 
-  await saveCredentials(updated);
+  await saveCredentials(updated, targetProfile);
   return updated;
 }
 
 /**
  * Gets a guaranteed valid ID token (automatically refreshing if expired, or signing in via env)
  */
-export async function getValidAuthSession(): Promise<StoredCredentials> {
-  let creds = await loadStoredCredentials();
+export async function getValidAuthSession(profileName?: string): Promise<StoredCredentials> {
+  const targetProfile = profileName || activeProfileName || "default";
+  let creds = await loadStoredCredentials(targetProfile);
 
   // If no stored credentials, try env vars
   if (!creds) {
     if (process.env.FOTO_EMAIL && process.env.FOTO_PASSWORD) {
-      return await signInWithEmailAndPassword();
+      return await signInWithEmailAndPassword(undefined, undefined, targetProfile);
     }
     throw new Error(
       "Not authenticated. Please use the `foto_login` tool with your email and password, or set FOTO_EMAIL and FOTO_PASSWORD in your environment."
@@ -177,11 +429,11 @@ export async function getValidAuthSession(): Promise<StoredCredentials> {
   // Token expired, refresh it
   if (creds.refreshToken) {
     try {
-      return await refreshIdToken(creds.refreshToken);
-    } catch (err) {
+      return await refreshIdToken(creds.refreshToken, targetProfile);
+    } catch {
       // If refresh failed, fall back to email/password if available
       if (process.env.FOTO_EMAIL && process.env.FOTO_PASSWORD) {
-        return await signInWithEmailAndPassword();
+        return await signInWithEmailAndPassword(undefined, undefined, targetProfile);
       }
       throw new Error(`Authentication token expired and could not be refreshed. Please run foto_login again.`);
     }
@@ -193,19 +445,22 @@ export async function getValidAuthSession(): Promise<StoredCredentials> {
 /**
  * Returns current login status for inspection
  */
-export async function getAuthStatus(): Promise<AuthStatus> {
+export async function getAuthStatus(profileName?: string): Promise<AuthStatus> {
+  const targetProfile = profileName || activeProfileName || "default";
   try {
-    const creds = await loadStoredCredentials();
+    const creds = await loadStoredCredentials(targetProfile);
     if (!creds) {
       if (process.env.FOTO_EMAIL) {
         return {
           loggedIn: false,
+          activeProfile: targetProfile,
           email: process.env.FOTO_EMAIL,
           message: "Credentials configured in environment but not yet authenticated."
         };
       }
       return {
         loggedIn: false,
+        activeProfile: targetProfile,
         message: "No active Foto session found. Please run `foto_login`."
       };
     }
@@ -215,14 +470,17 @@ export async function getAuthStatus(): Promise<AuthStatus> {
 
     return {
       loggedIn: true,
+      activeProfile: targetProfile,
       email: creds.email,
       userId: creds.userId,
       expiresInMinutes,
-      message: `Authenticated as ${creds.email || creds.userId} (token valid for ~${expiresInMinutes}m).`
+      encryptedAtRest: true,
+      message: `Authenticated as ${creds.email || creds.userId} on profile "${targetProfile}" (token valid for ~${expiresInMinutes}m).`
     };
   } catch (err: any) {
     return {
       loggedIn: false,
+      activeProfile: targetProfile,
       message: err.message
     };
   }

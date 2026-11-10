@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { inspectImage, prepareImageForUpload, ImageInspection, PreparedImage } from "./media/processor.js";
+import { parseXmpFile, XmpMetadata } from "./media/xmp.js";
 import { validateTags, suggestTags, searchTags } from "./tags.js";
 import { getValidAuthSession, getAuthStatus } from "./api/auth.js";
 import { uploadImageToFotoStorage } from "./api/storage.js";
@@ -25,13 +26,20 @@ import {
   unlikePostInFirestore,
   fetchPostComments,
   addPostComment,
+  deleteCommentFromFirestore,
+  fetchPostLikesUsers,
   fetchUserNotifications,
   fetchHomeFeed,
   savePortfolioDocument,
   fetchUserPortfolios,
+  updatePortfolioInFirestore,
+  deletePortfolioFromFirestore,
+  updateUserProfileInFirestore,
+  reportContentInFirestore,
   PortfolioImageRecord
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
+
 
 export interface BrowseTagParams {
   tag: string;
@@ -916,9 +924,13 @@ export class FotoClient {
   }
 
   /**
-   * Fetches comments for a specific post
+   * Fetches comments (and optional threaded replies) for a specific post
    */
-  async getComments(postId: string, limit?: number): Promise<Array<Record<string, any>>> {
+  async getComments(
+    postId: string,
+    limit?: number,
+    includeReplies = true
+  ): Promise<Array<Record<string, any>>> {
     if (!postId || typeof postId !== "string") {
       throw new Error("Invalid postId provided.");
     }
@@ -926,14 +938,19 @@ export class FotoClient {
     return await fetchPostComments({
       postId,
       idToken: authSession.idToken,
-      limit
+      limit,
+      includeReplies
     });
   }
 
   /**
-   * Posts a comment to a Foto post
+   * Posts a comment (or threaded reply if parentCommentId is provided) to a Foto post
    */
-  async postComment(postId: string, text: string): Promise<Record<string, any>> {
+  async postComment(
+    postId: string,
+    text: string,
+    parentCommentId?: string
+  ): Promise<Record<string, any>> {
     if (!postId || typeof postId !== "string") {
       throw new Error("Invalid postId provided.");
     }
@@ -945,14 +962,200 @@ export class FotoClient {
       postId,
       userId: authSession.userId,
       text: text.trim(),
+      parentCommentId,
       idToken: authSession.idToken
     });
 
     return {
       success: true,
       comment,
-      message: `Successfully posted comment on post "${postId}".`
+      message: parentCommentId
+        ? `Successfully posted reply to comment "${parentCommentId}" on post "${postId}".`
+        : `Successfully posted comment on post "${postId}".`
     };
+  }
+
+  /**
+   * Deletes a comment or threaded reply on a Foto post
+   */
+  async deleteComment(params: {
+    commentId: string;
+    postId: string;
+    isReply?: boolean;
+  }): Promise<{ success: boolean; commentId: string; postId: string; message: string }> {
+    const { commentId, postId, isReply = false } = params;
+    if (!commentId || typeof commentId !== "string") {
+      throw new Error("Invalid commentId provided.");
+    }
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await deleteCommentFromFirestore({
+      commentId,
+      postId,
+      userId: authSession.userId,
+      isReply,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      commentId,
+      postId,
+      message: success
+        ? `Successfully deleted ${isReply ? "reply" : "comment"} "${commentId}".`
+        : `Failed to delete ${isReply ? "reply" : "comment"} "${commentId}".`
+    };
+  }
+
+  /**
+   * Resolves the list of photographers who liked a post (/app/liked-by/:postId)
+   */
+  async getPostLikes(postId: string, limit?: number) {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    return await fetchPostLikesUsers({
+      postId,
+      idToken: authSession.idToken,
+      limit
+    });
+  }
+
+  /**
+   * Updates an existing portfolio showcase (title, description, tags, cover, or image slides)
+   */
+  async updatePortfolio(params: {
+    postId: string;
+    title?: string;
+    description?: string;
+    tags?: string[];
+    coverImageId?: string;
+    coverAlignmentX?: number;
+  }): Promise<{ success: boolean; postId: string; portfolio: Record<string, any>; message: string }> {
+    const { postId, title, description, tags, coverImageId, coverAlignmentX } = params;
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid portfolio postId provided.");
+    }
+
+    let validatedTags: string[] | undefined;
+    if (tags !== undefined) {
+      const validation = validateTags(tags);
+      if (!validation.valid) {
+        throw new Error(`Tag validation failed: ${validation.error}`);
+      }
+      validatedTags = validation.canonicalTags;
+    }
+
+    const authSession = await getValidAuthSession();
+    const updated = await updatePortfolioInFirestore({
+      postId,
+      userId: authSession.userId,
+      title,
+      description,
+      tags: validatedTags,
+      coverImageId,
+      coverAlignmentX,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      postId,
+      portfolio: updated,
+      message: `Successfully updated portfolio "${postId}".`
+    };
+  }
+
+  /**
+   * Deletes an existing portfolio showcase and cleans up all associated slide metadata and shards
+   */
+  async deletePortfolio(postId: string): Promise<{ success: boolean; postId: string; message: string }> {
+    if (!postId || typeof postId !== "string") {
+      throw new Error("Invalid portfolio postId provided.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await deletePortfolioFromFirestore({
+      postId,
+      userId: authSession.userId,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success,
+      postId,
+      message: success
+        ? `Successfully deleted portfolio "${postId}".`
+        : `Failed to delete portfolio "${postId}".`
+    };
+  }
+
+  /**
+   * Updates the authenticated user's profile metadata (displayName, bio, website, profilePhotoUrl)
+   */
+  async updateUserProfile(params: {
+    displayName?: string;
+    bio?: string;
+    website?: string;
+    profilePhotoUrl?: string;
+  }): Promise<{ success: boolean; userId: string; profile: Record<string, any>; message: string }> {
+    const authSession = await getValidAuthSession();
+    const updated = await updateUserProfileInFirestore({
+      userId: authSession.userId,
+      displayName: params.displayName,
+      bio: params.bio,
+      website: params.website,
+      profilePhotoUrl: params.profilePhotoUrl,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      userId: authSession.userId,
+      profile: updated,
+      message: `Successfully updated user profile for ${authSession.userId}.`
+    };
+  }
+
+  /**
+   * Submits a community safety moderation report for a post or user
+   */
+  async reportContent(params: {
+    targetType: "post" | "user";
+    targetId: string;
+    reason: string;
+    details?: string;
+  }): Promise<{ success: boolean; report: Record<string, any>; message: string }> {
+    if (!params.targetId || !params.targetId.trim()) {
+      throw new Error("targetId is required.");
+    }
+    if (!params.reason || !params.reason.trim()) {
+      throw new Error("Report reason is required.");
+    }
+    const authSession = await getValidAuthSession();
+    const report = await reportContentInFirestore({
+      reporterUserId: authSession.userId,
+      targetType: params.targetType,
+      targetId: params.targetId.trim(),
+      reason: params.reason.trim(),
+      details: params.details,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      report,
+      message: `Submitted ${params.targetType} safety report (${report.reportId}).`
+    };
+  }
+
+  /**
+   * Parses an Adobe Lightroom / Capture One / Darktable .xmp sidecar file
+   */
+  async parseXmp(filePath: string): Promise<XmpMetadata> {
+    return await parseXmpFile(filePath);
   }
 
   /**
@@ -1208,5 +1411,6 @@ export class FotoClient {
     });
   }
 }
+
 
 
