@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { inspectImage, prepareImageForUpload, ImageInspection, PreparedImage } from "./media/processor.js";
+import { inspectImage, prepareImageForUpload, prepareAvatarImage, ImageInspection, PreparedImage } from "./media/processor.js";
 import { parseXmpFile, XmpMetadata } from "./media/xmp.js";
 import { validateTags, suggestTags, searchTags } from "./tags.js";
 import { getValidAuthSession, getAuthStatus } from "./api/auth.js";
@@ -36,6 +36,12 @@ import {
   deletePortfolioFromFirestore,
   updateUserProfileInFirestore,
   reportContentInFirestore,
+  checkUsernameAvailability,
+  fetchUserFollowers,
+  fetchUserFollowing,
+  fetchFeaturedPhotographers,
+  dismissNotificationInFirestore,
+  fetchExploreFeed,
   PortfolioImageRecord
 } from "./api/firestore.js";
 import { PLATFORM_LIMITS } from "./config.js";
@@ -1408,6 +1414,145 @@ export class FotoClient {
       userId: targetUserId,
       idToken: authSession.idToken,
       limit: params?.limit
+    });
+  }
+
+  /**
+   * Checks whether a @username handle is available on Foto
+   */
+  async checkUsername(username: string): Promise<{ available: boolean; username: string; reason?: string }> {
+    const authSession = await getValidAuthSession();
+    return await checkUsernameAvailability({ username, idToken: authSession.idToken });
+  }
+
+  /**
+   * Resolves the list of photographers who follow a given user or the authenticated user
+   */
+  async getUserFollowers(params?: {
+    userId?: string;
+    username?: string;
+    limit?: number;
+  }) {
+    const authSession = await getValidAuthSession();
+    let targetUserId = params?.userId;
+
+    if (!targetUserId && params?.username) {
+      const resolved = await resolveUserByUsername({ username: params.username, idToken: authSession.idToken });
+      if (!resolved) {
+        throw new Error(`Photographer with username "${params.username}" not found.`);
+      }
+      targetUserId = resolved;
+    }
+
+    if (!targetUserId) {
+      targetUserId = authSession.userId;
+    }
+
+    return await fetchUserFollowers({
+      userId: targetUserId,
+      idToken: authSession.idToken,
+      limit: params?.limit
+    });
+  }
+
+  /**
+   * Resolves the list of photographers that a user or the authenticated user is following
+   */
+  async getUserFollowing(params?: {
+    userId?: string;
+    username?: string;
+    limit?: number;
+  }) {
+    const authSession = await getValidAuthSession();
+    let targetUserId = params?.userId;
+
+    if (!targetUserId && params?.username) {
+      const resolved = await resolveUserByUsername({ username: params.username, idToken: authSession.idToken });
+      if (!resolved) {
+        throw new Error(`Photographer with username "${params.username}" not found.`);
+      }
+      targetUserId = resolved;
+    }
+
+    if (!targetUserId) {
+      targetUserId = authSession.userId;
+    }
+
+    return await fetchUserFollowing({
+      userId: targetUserId,
+      idToken: authSession.idToken,
+      limit: params?.limit
+    });
+  }
+
+  /**
+   * Retrieves community ambassador and featured photographers on Foto
+   */
+  async getFeaturedPhotographers(limit?: number) {
+    const authSession = await getValidAuthSession();
+    return await fetchFeaturedPhotographers({ idToken: authSession.idToken, limit });
+  }
+
+  /**
+   * Uploads and updates the authenticated user's profile avatar photo from a local image file
+   */
+  async uploadProfilePhoto(filePath: string): Promise<{ success: boolean; profilePhotoUrl: string; message: string }> {
+    if (!filePath || typeof filePath !== "string") {
+      throw new Error("filePath is required.");
+    }
+    const authSession = await getValidAuthSession();
+    const avatarBuffer = await prepareAvatarImage(filePath);
+
+    const storageResult = await uploadImageToFotoStorage({
+      buffer: avatarBuffer,
+      userId: authSession.userId,
+      idToken: authSession.idToken,
+      folder: "avatars"
+    });
+
+    await updateUserProfileInFirestore({
+      userId: authSession.userId,
+      profilePhotoUrl: storageResult.imageUrl,
+      idToken: authSession.idToken
+    });
+
+    return {
+      success: true,
+      profilePhotoUrl: storageResult.imageUrl,
+      message: `Successfully uploaded and updated profile avatar for ${authSession.userId}.`
+    };
+  }
+
+  /**
+   * Dismisses or deletes a notification from the authenticated user's notifications collection
+   */
+  async dismissNotification(notificationId: string): Promise<{ success: boolean; notificationId: string; message: string }> {
+    if (!notificationId || typeof notificationId !== "string") {
+      throw new Error("notificationId is required.");
+    }
+    const authSession = await getValidAuthSession();
+    const success = await dismissNotificationInFirestore({
+      notificationId,
+      idToken: authSession.idToken
+    });
+    return {
+      success,
+      notificationId,
+      message: success
+        ? `Successfully dismissed notification "${notificationId}".`
+        : `Failed to dismiss notification "${notificationId}".`
+    };
+  }
+
+  /**
+   * Retrieves a curated explore feed of recent public works across major photographic genres
+   */
+  async getExploreFeed(params?: { limit?: number; tags?: string[] }) {
+    const authSession = await getValidAuthSession();
+    return await fetchExploreFeed({
+      idToken: authSession.idToken,
+      limit: params?.limit,
+      tags: params?.tags
     });
   }
 }

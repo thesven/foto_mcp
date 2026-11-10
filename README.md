@@ -19,7 +19,7 @@ flowchart TD
     Client["AI Assistant / MCP Client<br>(Claude Desktop, Cursor, Zed, Windsurf)"]
     
     subgraph Foto_MCP ["Foto MCP Server v3.0.0 (foto_mcp)"]
-        Tools["42 Native MCP Tools<br>7 Resources & 5 Prompts"]
+        Tools["49 Native MCP Tools<br>10 Resources & 7 Prompts"]
         Proc["Sharp, Exifr & XMP Pipeline<br>• Max 1820px Zero-Crop<br>• Embedded sRGB ICC Profile<br>• Strips GPS & Thumbnails<br>• Parses Camera EXIF & .xmp Sidecars"]
         Auth["Multi-Profile Firebase Auth<br>• AES-256-GCM Encrypted Storage<br>• Named Account Switcher<br>• Auto Token Refresh (60s buffer)"]
         Sync["Migration, Queue & Archival Suite<br>• Instagram, Flickr & VSCO Sync<br>• Offline Draft Queue & Batch Publish<br>• Vault Exporter & Watch Folder Monitor"]
@@ -173,7 +173,7 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## Complete MCP Tool Suite (42 Tools)
+## Complete MCP Tool Suite (49 Tools)
 
 | Tool | Purpose | Key Arguments |
 | :--- | :--- | :--- |
@@ -182,14 +182,19 @@ export FOTO_PASSWORD="your_password"
 | `foto_logout` | Clears cached session tokens for active or specified profile. | `profileName?` |
 | `foto_list_profiles` | Lists all saved Foto account profiles and shows which account is active. | *None* |
 | `foto_switch_profile` | Switches the active Foto account profile on the fly. | `profileName` |
+| `foto_check_username` | Checks whether an @username handle is available on Foto (verifying length, alphanumeric characters, and usernames registry). | `username` |
 | `foto_inspect_image` | Inspects local image & `.xmp` sidecar: returns dimensions, color space, GPS status, camera EXIF, and sRGB base64 preview thumbnail. | `filePath`, `includePreview?` |
 | `foto_parse_xmp` | Parses an Adobe Lightroom, Capture One, or Darktable `.xmp` sidecar file for ratings, color labels, titles, keywords, and film recipes. | `filePath` |
 | `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, film stock, or Fuji film simulations. | `caption?`, `cameraInfo?`, `keywords?` |
 | `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query`, `limit?` |
 | `foto_browse_tag` | Browse recent public posts under any of Foto's 303 curated tags with shard and pagination support. | `tag`, `limit?`, `shard?` |
 | `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`, `Street`). | `tag`, `limit?` |
+| `foto_get_featured_photographers` | Retrieves official community ambassadors and featured photographers on Foto (`ambassador-usernames` or curated top creators). | `limit?` |
+| `foto_get_explore_feed` | Retrieves a curated explore feed of recent public works aggregated across major photographic genres. | `limit?`, `tags?` |
 | `foto_follow_user` | Follows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms. | `userId?`, `userIds?` |
 | `foto_unfollow_user` | Unfollows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms. | `userId?`, `userIds?` |
+| `foto_get_user_followers` | Retrieves and resolves the follower profiles of any photographer or the authenticated user. | `userId?`, `username?`, `limit?` |
+| `foto_get_user_following` | Retrieves and resolves the creator profiles of photographers followed by a user or the authenticated user. | `userId?`, `username?`, `limit?` |
 | `foto_draft_post` | Validates a post draft and returns a multimodal `ImageContent` preview alongside EXIF and tag checks. | `filePath`, `caption`, `tags`, `includePreview?` |
 | `foto_publish_post` | Normalizes image (1820px, embedded sRGB ICC), scrubs GPS, passes Sightengine moderation, and publishes to Firestore. | `filePath`, `caption`, `tags`, `dryRun?` |
 | `foto_publish_series` | Publishes a multi-image sequential Series (2 to 5 photos) under one post. | `filePaths` (2–5), `caption`, `tags`, `dryRun?` |
@@ -207,10 +212,12 @@ export FOTO_PASSWORD="your_password"
 | `foto_post_comment` | Posts a top-level comment or threaded reply (`parentCommentId`) to a Foto post. | `postId`, `text`, `parentCommentId?` |
 | `foto_delete_comment` | Deletes one of your comments or threaded replies and decrements `commentCount`. | `commentId`, `postId`, `isReply?` |
 | `foto_get_notifications` | Retrieves recent community alerts on your Foto account (likes, comments, replies, follows). | `limit?` |
+| `foto_dismiss_notification` | Dismisses or deletes an alert from your notifications collection. | `notificationId` |
 | `foto_get_home_feed` | Retrieves your chronological home timeline of posts published by creators you follow. | `limit?` |
 | `foto_get_photographer_profile` | Looks up any photographer's public profile on Foto by user ID or `@username`. | `userId?`, `username?` |
 | `foto_get_user_profile` | Retrieves current authenticated user's profile info, bio, and published post stats. | *None* |
 | `foto_update_user_profile` | Updates your authenticated Foto profile (`displayName`, `bio`, `website`, `profilePhotoUrl`). | `displayName?`, `bio?`, `website?`, `profilePhotoUrl?` |
+| `foto_upload_profile_photo` | Crops (400x400 square), normalizes, uploads, and sets your account avatar photo. | `filePath` |
 | `foto_report_content` | Submits a community safety moderation report for a post or user. | `targetType` (`post` \| `user`), `targetId`, `reason`, `details?` |
 | `foto_sync_instagram` | Migrates posts from an Instagram HTML export: strips hashtags, maps curated tags, scrubs GPS, and deduplicates. | `htmlFilePath`, `mediaDir?`, `maxPosts?`, `dryRun?` |
 | `foto_sync_flickr` | Migrates photography archives from Flickr account JSON exports: maps tags, resolves local images, and deduplicates. | `exportPath`, `mediaDir?`, `maxPhotos?`, `dryRun?` |
@@ -222,13 +229,16 @@ export FOTO_PASSWORD="your_password"
 
 ---
 
-## MCP Resources (7) & Prompts (5)
+## MCP Resources (10) & Prompts (7)
 
 ### Resources & Dynamic Templates
 * **`foto://curated-tags`**: Exposes the complete JSON array of all 303 curated tags permitted on Foto.
 * **`foto://my/profile`**: Active user's profile, bio, social counts, and published post IDs on Foto.
+* **`foto://my/followers`**: Dynamic resource stream of photographers who follow the active user.
+* **`foto://my/following`**: Dynamic resource stream of creators followed by the active user.
 * **`foto://my/feed`**: Dynamic resource stream of the user's chronological home timeline of posts from followed creators.
 * **`foto://my/notifications`**: Dynamic resource stream of incoming community interaction alerts (likes, comments, mentions, follows).
+* **`foto://explore/featured`**: Dynamic resource stream of community ambassadors and top featured photographers.
 * **`foto://posts/{postId}`**: Dynamic resource template resolving live post JSON documents and camera EXIF metadata.
 * **`foto://users/{userId}`**: Dynamic resource template resolving public creator profiles, bios, stats, and recent post IDs.
 * **`foto://tags/{tag}/recent`**: Dynamic resource template resolving recent public posts under any of Foto's 303 curated tags.
@@ -239,6 +249,8 @@ export FOTO_PASSWORD="your_password"
 * **`curate_photo_series`**: Pacing and visual flow guidance for sequencing 2 to 5 photos into an emotional narrative series.
 * **`photo_walk_curator`**: Pre-shoot planning assistant pairing camera gear, focal lengths, film stocks, and Foto curated tags to shooting conditions.
 * **`daily_foto_briefing`**: Morning digest workflow summarizing new posts from followed photographers, recent notifications, and community highlights.
+* **`portfolio_curator`**: Masterclass portfolio showcase curation: selects, sequences, and formulates 2–20 slides with artist statement and cover alignment.
+* **`analog_lab_assistant`**: Film emulsion recipes, push/pull exposure compensations, lab development chemistry notes, and Foto curated analog tag mapping.
 
 ---
 

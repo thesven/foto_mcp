@@ -1238,6 +1238,165 @@ server.tool(
   }
 );
 
+// Tool 43: foto_check_username
+server.tool(
+  "foto_check_username",
+  "Check whether an @username handle is available on Foto (verifying length, alphanumeric characters, and querying the usernames registry).",
+  {
+    username: z.string().describe("The username handle to check (with or without leading '@')")
+  },
+  async ({ username }) => {
+    try {
+      const result = await client.checkUsername(username);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to check username "${username}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 44: foto_get_user_followers
+server.tool(
+  "foto_get_user_followers",
+  "Retrieve and resolve the list of photographers who follow a specific user or yourself on Foto.",
+  {
+    userId: z.string().optional().describe("User ID whose followers to inspect (defaults to authenticated user)"),
+    username: z.string().optional().describe("Username handle whose followers to inspect"),
+    limit: z.number().int().positive().max(50).optional().describe("Maximum follower profiles to return (default: 20)")
+  },
+  async ({ userId, username, limit }) => {
+    try {
+      const result = await client.getUserFollowers({ userId, username, limit });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch followers: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 45: foto_get_user_following
+server.tool(
+  "foto_get_user_following",
+  "Retrieve and resolve the list of photographers that a specific user or yourself is following on Foto.",
+  {
+    userId: z.string().optional().describe("User ID whose following list to inspect (defaults to authenticated user)"),
+    username: z.string().optional().describe("Username handle whose following list to inspect"),
+    limit: z.number().int().positive().max(50).optional().describe("Maximum following profiles to return (default: 20)")
+  },
+  async ({ userId, username, limit }) => {
+    try {
+      const result = await client.getUserFollowing({ userId, username, limit });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch following: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 46: foto_get_featured_photographers
+server.tool(
+  "foto_get_featured_photographers",
+  "Discover community ambassador and featured creators on Foto with bio summaries, follower stats, and showcase links.",
+  {
+    limit: z.number().int().positive().max(25).optional().describe("Maximum featured photographers to return (default: 10)")
+  },
+  async ({ limit }) => {
+    try {
+      const result = await client.getFeaturedPhotographers(limit);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch featured photographers: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 47: foto_upload_profile_photo
+server.tool(
+  "foto_upload_profile_photo",
+  "Upload and set your photographer profile avatar photo from a local image file. Resizes to 400x400 square, normalizes sRGB color, strips GPS, uploads to Storage, and updates user-profiles.",
+  {
+    filePath: z.string().describe("Absolute local path to the image file to use as avatar")
+  },
+  async ({ filePath }) => {
+    try {
+      const result = await client.uploadProfilePhoto(filePath);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to upload profile photo: ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 48: foto_dismiss_notification
+server.tool(
+  "foto_dismiss_notification",
+  "Dismiss or delete an alert from your notifications collection on Foto.",
+  {
+    notificationId: z.string().describe("The notification ID to dismiss")
+  },
+  async ({ notificationId }) => {
+    try {
+      const result = await client.dismissNotification(notificationId);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to dismiss notification "${notificationId}": ${err.message}` }]
+      };
+    }
+  }
+);
+
+// Tool 49: foto_get_explore_feed
+server.tool(
+  "foto_get_explore_feed",
+  "Retrieve a rich curated explore feed of recent public works across major photographic genres (Street, Landscape, Portrait, Analog, Fine Art, Architecture).",
+  {
+    limit: z.number().int().positive().max(50).optional().describe("Maximum explore posts to return (default: 20)"),
+    tags: z.array(z.string()).optional().describe("Optional subset of curated tags to explore")
+  },
+  async ({ limit, tags }) => {
+    try {
+      const result = await client.getExploreFeed({ limit, tags });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }]
+      };
+    } catch (err: any) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `Failed to fetch explore feed: ${err.message}` }]
+      };
+    }
+  }
+);
+
 // MCP Resource 1: Official 303 Curated Allowed Tags Whitelist
 server.registerResource(
   "foto-curated-tags",
@@ -1329,7 +1488,76 @@ server.registerResource(
   }
 );
 
-// MCP Dynamic Resource Template 5: Post Details
+// MCP Resource 5: My Followers
+server.registerResource(
+  "foto-my-followers",
+  "foto://my/followers",
+  {
+    title: "My Foto Followers",
+    description: "List of photographers who follow the active authenticated account on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const followers = await client.getUserFollowers();
+    return {
+      contents: [
+        {
+          uri: "foto://my/followers",
+          mimeType: "application/json",
+          text: JSON.stringify(followers, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Resource 6: My Following
+server.registerResource(
+  "foto-my-following",
+  "foto://my/following",
+  {
+    title: "My Foto Following",
+    description: "List of photographers the active authenticated account follows on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const following = await client.getUserFollowing();
+    return {
+      contents: [
+        {
+          uri: "foto://my/following",
+          mimeType: "application/json",
+          text: JSON.stringify(following, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Resource 7: Featured & Ambassador Photographers
+server.registerResource(
+  "foto-explore-featured",
+  "foto://explore/featured",
+  {
+    title: "Foto Featured & Ambassador Photographers",
+    description: "Community ambassador creators and featured photographers on Foto",
+    mimeType: "application/json"
+  },
+  async () => {
+    const ambassadors = await client.getFeaturedPhotographers(15);
+    return {
+      contents: [
+        {
+          uri: "foto://explore/featured",
+          mimeType: "application/json",
+          text: JSON.stringify(ambassadors, null, 2)
+        }
+      ]
+    };
+  }
+);
+
+// MCP Dynamic Resource Template 8: Post Details
 server.resource(
   "foto-post-detail",
   new ResourceTemplate("foto://posts/{postId}", { list: undefined }),
@@ -1352,7 +1580,7 @@ server.resource(
   }
 );
 
-// MCP Dynamic Resource Template 6: Photographer Profile
+// MCP Dynamic Resource Template 9: Photographer Profile
 server.resource(
   "foto-user-profile",
   new ResourceTemplate("foto://users/{userId}", { list: undefined }),
@@ -1375,7 +1603,7 @@ server.resource(
   }
 );
 
-// MCP Dynamic Resource Template 7: Recent Posts by Curated Tag
+// MCP Dynamic Resource Template 10: Recent Posts by Curated Tag
 server.resource(
   "foto-tag-recent",
   new ResourceTemplate("foto://tags/{tag}/recent", { list: undefined }),
@@ -1541,6 +1769,65 @@ server.registerPrompt(
   }
 );
 
+// MCP Prompt 6: Portfolio Showcase Curator
+server.registerPrompt(
+  "portfolio_curator",
+  {
+    title: "Portfolio Showcase Curator",
+    description: "Selects, sequences, and formulates a cohesive Portfolio collection from a photographer's candidate body of work with artist statement and cover alignment."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please help me curate a high-impact Portfolio showcase for Foto (https://fotoapp.co/).
+
+Guidelines:
+1. Editorial Selection: Select the strongest cohesive images (between 2 and 20 slides) from my body of work.
+2. Narrative Arc & Sequence: Arrange the images with dynamic rhythm (establishing hook, tonal variety, thematic climax, and resolute conclusion).
+3. Cover Image & Alignment: Designate which slide acts as the cover and recommend horizontal alignment (coverAlignmentX: 0.0=left, 0.5=center, 1.0=right).
+4. Artist Statement: Formulate an insightful title and descriptive artist statement explaining the inspiration and creative context.
+5. Curated Tags: Select 1 to 3 official Foto tags (e.g. Fine Art, Landscape, Architecture) that capture the essence of the work.
+6. Publish: Test with foto_create_portfolio (dryRun: true) and execute live.`
+          }
+        }
+      ]
+    };
+  }
+);
+
+// MCP Prompt 7: Analog Lab Assistant
+server.registerPrompt(
+  "analog_lab_assistant",
+  {
+    title: "Analog Lab & Film Recipe Assistant",
+    description: "Formulates film recipes, push/pull exposure compensations, development chemistry notes, and matching Foto analog curated tags."
+  },
+  async () => {
+    return {
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Please assist me in cataloging and publishing my analog film photography to Foto (https://fotoapp.co/).
+
+Steps:
+1. Film Stock & Processing: Document the emulsion (e.g. Kodak Portra 400, Tri-X 400, Ilford HP5 Plus, CineStill 800T, Fuji Pro 400H), exposure rating (box speed or pushed/pulled stops), and lab development chemistry (C-41, D-76, Rodinal, HC-110, ECN-2).
+2. Camera & Glass: Record the camera body format (35mm, 6x4.5, 6x6, 6x7, 6x9, 4x5 large format) and lens aperture.
+3. Curated Tags: Map the capture to Foto's official analog tags (e.g. Analog, 35mm, Medium Format, Large Format, Black and White, Film).
+4. Caption: Formulate a technical and artistic caption detailing the analog process without any hashtags.
+5. Ingest: Parse Lightroom/Capture One scan sidecars with foto_parse_xmp or stage via foto_publish_post.`
+          }
+        }
+      ]
+    };
+  }
+);
+
 export { server, client, draftQueue };
 
 async function main() {
@@ -1584,9 +1871,9 @@ async function main() {
             name: "foto_mcp",
             version: "3.0.0",
             status: "running",
-            toolsCount: 42,
-            resourcesCount: 7,
-            promptsCount: 5,
+            toolsCount: 49,
+            resourcesCount: 10,
+            promptsCount: 7,
             activeSseSessions: activeTransports.size
           })
         );
@@ -1609,3 +1896,4 @@ if (process.env.NODE_ENV !== "test" && !process.env.FOTO_MCP_TEST) {
     process.exit(1);
   });
 }
+

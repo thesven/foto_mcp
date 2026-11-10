@@ -30,7 +30,7 @@ export async function uploadImageToFotoStorage(params: {
   buffer: Buffer;
   userId: string;
   idToken: string;
-  folder?: "posts" | "portfolios";
+  folder?: "posts" | "portfolios" | "avatars" | string;
   customImageId?: string;
 }): Promise<StorageUploadResult> {
   const { buffer, userId, idToken, folder = "posts", customImageId } = params;

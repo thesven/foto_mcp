@@ -630,6 +630,204 @@ export async function runMcpServerTests() {
     const queueFailMcp = await tools.foto_queue_draft.handler({ caption: "No file", tags: ["Street"] }, {} as any);
     assert.strictEqual(queueFailMcp.isError, true);
 
+    // 40. Tools 43-49: Core Social, Ambassador, Profile & Discovery
+    // Ensure credentials saved for authenticated MCP calls
+    await saveCredentials({
+      userId: "u_mcp_user",
+      email: "mcp_user@test.com",
+      idToken: "tok_mcp",
+      refreshToken: "ref_mcp",
+      expiresAt: Date.now() + 3600000
+    });
+
+    // Tool: foto_check_username
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/taken_mcp")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_taken" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const checkUserOk = await tools.foto_check_username.handler({ username: "avail_mcp" }, {} as any);
+    assert(!checkUserOk.isError);
+    assert(checkUserOk.content[0].text.includes('"available": true'));
+
+    const checkUserTaken = await tools.foto_check_username.handler({ username: "taken_mcp" }, {} as any);
+    assert(!checkUserTaken.isError);
+    assert(checkUserTaken.content[0].text.includes("already taken"));
+
+    const checkUserInvalid = await tools.foto_check_username.handler({ username: "a" }, {} as any);
+    assert(!checkUserInvalid.isError);
+    assert(checkUserInvalid.content[0].text.includes("between 3 and 30 characters"));
+
+    globalThis.fetch = async () => { throw new Error("Network offline"); };
+    const checkUserFail = await tools.foto_check_username.handler({ username: "avail_mcp" }, {} as any);
+    assert.strictEqual(checkUserFail.isError, true);
+
+    // Tool: foto_get_user_followers
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_mcp_user")) {
+        return new Response(JSON.stringify({ fields: { followers: { arrayValue: { values: [{ stringValue: "u_follower_mcp" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_follower_mcp")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "follower_mcp" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const getFollowersMcp = await tools.foto_get_user_followers.handler({ limit: 5 }, {} as any);
+    assert(!getFollowersMcp.isError);
+    assert(getFollowersMcp.content[0].text.includes("follower_mcp"));
+
+    // Tool: foto_get_user_following
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_mcp_user")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_following_mcp" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_following_mcp")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "following_mcp" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const getFollowingMcp = await tools.foto_get_user_following.handler({ limit: 5 }, {} as any);
+    assert(!getFollowingMcp.isError);
+    assert(getFollowingMcp.content[0].text.includes("following_mcp"));
+
+    // Tool: foto_get_featured_photographers
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes(":runQuery")) {
+        return new Response(JSON.stringify([
+          { document: { name: "projects/.../ambassador-usernames/amb_creator" } }
+        ]), { status: 200 });
+      }
+      if (urlStr.includes("usernames/amb_creator")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_amb" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_amb")) {
+        return new Response(JSON.stringify({
+          fields: {
+            username: { stringValue: "amb_creator" },
+            displayName: { stringValue: "Ambassador Creator" }
+          }
+        }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const getFeaturedMcp = await tools.foto_get_featured_photographers.handler({ limit: 5 }, {} as any);
+    assert(!getFeaturedMcp.isError);
+    assert(getFeaturedMcp.content[0].text.includes("amb_creator"));
+
+    // Tool: foto_upload_profile_photo
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("firebasestorage.googleapis.com")) {
+        return new Response(JSON.stringify({ name: "avatars/u_mcp_user/avatar.jpg", downloadTokens: "tok-av" }), { status: 200 });
+      }
+      if (urlStr.includes("firestore.googleapis.com")) {
+        return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const upPhotoMcp = await tools.foto_upload_profile_photo.handler({ filePath: testImg }, {} as any);
+    assert(!upPhotoMcp.isError);
+    assert(upPhotoMcp.content[0].text.includes("Successfully uploaded"));
+
+    const upPhotoFailMcp = await tools.foto_upload_profile_photo.handler({ filePath: "/nonexistent/photo.jpg" }, {} as any);
+    assert.strictEqual(upPhotoFailMcp.isError, true);
+
+    // Tool: foto_dismiss_notification
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    const disNotifMcp = await tools.foto_dismiss_notification.handler({ notificationId: "n_del_mcp" }, {} as any);
+    assert(!disNotifMcp.isError);
+    assert(disNotifMcp.content[0].text.includes("Successfully dismissed"));
+
+    const disNotifFailMcp = await tools.foto_dismiss_notification.handler({ notificationId: "" }, {} as any);
+    assert.strictEqual(disNotifFailMcp.isError, true);
+
+    // Tool: foto_get_explore_feed
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "p_exp_mcp" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_exp_mcp")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_exp_mcp" }, userId: { stringValue: "u_mcp_user" }, description: { stringValue: "MCP Explore post" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const exploreMcp = await tools.foto_get_explore_feed.handler({ limit: 5 }, {} as any);
+    assert(!exploreMcp.isError);
+    assert(exploreMcp.content[0].text.includes("p_exp_mcp"));
+
+    // 41. Resources: foto://my/followers, foto://my/following, foto://explore/featured
+    const myFollowersRes = resources["foto://my/followers"];
+    assert(myFollowersRes, "foto://my/followers must be registered");
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_mcp_user")) {
+        return new Response(JSON.stringify({ fields: { followers: { arrayValue: { values: [{ stringValue: "u_f1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_f1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "fan_resource" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const myFollowersRead = await myFollowersRes.readCallback(new URL("foto://my/followers"), {} as any);
+    assert(myFollowersRead.contents[0].text.includes("fan_resource"));
+
+    const myFollowingRes = resources["foto://my/following"];
+    assert(myFollowingRes, "foto://my/following must be registered");
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_mcp_user")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_fol1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_fol1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "followed_resource" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const myFollowingRead = await myFollowingRes.readCallback(new URL("foto://my/following"), {} as any);
+    assert(myFollowingRead.contents[0].text.includes("followed_resource"));
+
+    const exploreFeaturedRes = resources["foto://explore/featured"];
+    assert(exploreFeaturedRes, "foto://explore/featured must be registered");
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes(":runQuery")) {
+        return new Response(JSON.stringify([
+          { document: { name: "projects/.../ambassador-usernames/featured_res_user" } }
+        ]), { status: 200 });
+      }
+      if (urlStr.includes("usernames/featured_res_user")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_feat" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_feat")) {
+        return new Response(JSON.stringify({
+          fields: {
+            username: { stringValue: "featured_res_user" },
+            displayName: { stringValue: "Featured Creator" }
+          }
+        }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const exploreFeaturedRead = await exploreFeaturedRes.readCallback(new URL("foto://explore/featured"), {} as any);
+    assert(exploreFeaturedRead.contents[0].text.includes("featured_res_user"));
+
+    // 42. Prompts: portfolio_curator and analog_lab_assistant
+    const portfolioPrompt = prompts["portfolio_curator"];
+    assert(portfolioPrompt, "portfolio_curator prompt must be registered");
+    const portfolioPromptRes = await portfolioPrompt.callback({ title: "Nordic Series", imageCount: "8" }, {} as any);
+    assert(portfolioPromptRes.messages[0].content.text.includes("Portfolio showcase for Foto"));
+
+    const analogPrompt = prompts["analog_lab_assistant"];
+    assert(analogPrompt, "analog_lab_assistant prompt must be registered");
+    const analogPromptRes = await analogPrompt.callback({ filmStock: "Kodak Tri-X 400" }, {} as any);
+    assert(analogPromptRes.messages[0].content.text.includes("analog film photography to Foto"));
+
   } finally {
     globalThis.fetch = originalFetch;
     await fs.rm(tempDir, { recursive: true, force: true });

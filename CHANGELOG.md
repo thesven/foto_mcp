@@ -8,7 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.0.0] - 2026-11-10
 
 ### Added
-- **Full Content Lifecycle & Social Graph Parity (42 Total MCP Tools)**:
+- **100% Platform Architecture Coverage & Social Graph Parity (49 Total MCP Tools)**:
+  - `foto_check_username`: Real-time handle validation checking alphanumeric formatting and querying `usernames/{username}`.
+  - `foto_get_user_followers` & `foto_get_user_following`: Complete social graph traversal resolving follower and following creator profiles (`user-profiles/{userId}`).
+  - `foto_get_featured_photographers`: Community discovery querying `ambassador-usernames` with fallback to top curated tag creators.
+  - `foto_upload_profile_photo`: Profile photo processing (400x400 square crop, embedded sRGB ICC, GPS stripped, JPEG 85%) and upload to `avatars/{userId}` with profile document update.
+  - `foto_dismiss_notification`: Alert management dismissing notifications from `notifications/{notificationId}`.
+  - `foto_get_explore_feed`: Discovery feed aggregating public posts across major curated genres (`Landscape`, `Street`, `Portrait`, `Analog`, `Fine Art`, `Architecture`, `Black and White`).
   - `foto_update_portfolio` & `foto_delete_portfolio`: Full CRUD lifecycle for curated Portfolio showcases (`type: "portfolio"`), supporting live updates to title, artist statement, curated tags, cover slide selection, and horizontal alignment, plus cascade deletion across all slide private metadata and tag shards.
   - `foto_delete_comment`: Delete your comments or threaded replies from `comments` or `replies` with automatic `commentCount` decrementing.
   - `foto_get_post_likes`: Inspect the photographers who liked a post (`/app/liked-by/:postId`), resolving user IDs, usernames, display names, avatars, and profile URLs.
@@ -28,9 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `foto_queue_draft` & `foto_manage_draft_queue`: Persistent local offline draft queue (`~/.config/foto-mcp/draft-queue.json`) supporting staging single posts or multi-image series offline and batch-publishing (`action: "list" | "publish" | "remove"`).
   - **Exponential Backoff Retries**: Added `fetchWithRetry` for resilient handling of transient `429`, `502`, `503`, and `504` responses.
   - **Multi-Session SSE Transport**: Upgraded SSE HTTP server to track concurrent client sessions via `sessionId` and expose a JSON health/capabilities status endpoint.
-- **Expanded MCP Resources (7 Total) & Prompts (5 Total)**:
-  - Added `foto://my/profile` resource and `foto://tags/{tag}/recent` dynamic resource template.
-  - Added `photo_walk_curator` and `daily_foto_briefing` masterclass prompts.
+- **Expanded MCP Resources (10 Total) & Prompts (7 Total)**:
+  - Added `foto://my/profile`, `foto://my/followers`, `foto://my/following`, `foto://explore/featured`, and `foto://tags/{tag}/recent` dynamic resources and templates.
+  - Added `portfolio_curator` (masterclass portfolio sequencing, alignment, artist statement) and `analog_lab_assistant` (film recipes, push/pull ISO, chemistry, analog tag mapping) prompts, joining `photo_walk_curator`, `daily_foto_briefing`, `curate_foto_post`, `critique_photograph`, and `curate_photo_series`.
   - Upgraded `foto_draft_post` to return multimodal `ImageContent` (`image/jpeg`) previews alongside validation diagnostics.
 
 ## [2.0.0] - 2026-11-09

@@ -1701,4 +1701,315 @@ export async function fetchUserPortfolios(params: {
   return portfolios.slice(0, max);
 }
 
+/**
+ * Checks whether a proposed @username handle is available on Foto by querying `usernames/{username}`.
+ */
+export async function checkUsernameAvailability(params: {
+  username: string;
+  idToken: string;
+}): Promise<{ available: boolean; username: string; reason?: string }> {
+  const cleanUsername = params.username.replace(/^@/, "").trim().toLowerCase();
+  if (!cleanUsername || cleanUsername.length < 3 || cleanUsername.length > 30) {
+    return {
+      available: false,
+      username: cleanUsername,
+      reason: "Username must be between 3 and 30 characters long."
+    };
+  }
+  if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
+    return {
+      available: false,
+      username: cleanUsername,
+      reason: "Username may only contain letters, numbers, and underscores."
+    };
+  }
+
+  const existing = await getFirestoreDocument({
+    collectionPath: "usernames",
+    documentId: cleanUsername,
+    idToken: params.idToken
+  });
+
+  if (existing) {
+    return {
+      available: false,
+      username: cleanUsername,
+      reason: `Username "@${cleanUsername}" is already taken.`
+    };
+  }
+
+  return {
+    available: true,
+    username: cleanUsername
+  };
+}
+
+/**
+ * Resolves the photographer profiles of users who follow a given user (followers list).
+ */
+export async function fetchUserFollowers(params: {
+  userId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<{
+  userId: string;
+  totalFollowers: number;
+  followers: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    profilePhotoUrl: string | null;
+    profileUrl: string;
+  }>;
+}> {
+  const userProfile = await fetchUserProfile({ userId: params.userId, idToken: params.idToken });
+  const followerIds: string[] = Array.isArray(userProfile?.followers) ? userProfile.followers : [];
+  const limit = Math.min(params.limit || 20, 50);
+  const selectedIds = followerIds.slice(0, limit);
+
+  const followers = await Promise.all(
+    selectedIds.map(async (uid) => {
+      let profile: Record<string, any> | null = null;
+      try {
+        profile = await fetchUserProfile({ userId: uid, idToken: params.idToken });
+      } catch {
+        // Ignore single fetch error
+      }
+      const username = profile?.username || `user_${uid.substring(0, 8)}`;
+      return {
+        userId: uid,
+        username,
+        displayName: profile?.displayName || profile?.name || username,
+        profilePhotoUrl: profile?.profilePhotoUrl || profile?.avatarUrl || null,
+        profileUrl: `https://the.fotoapp.co/app/profile?userId=${uid}`
+      };
+    })
+  );
+
+  return {
+    userId: params.userId,
+    totalFollowers: followerIds.length,
+    followers
+  };
+}
+
+/**
+ * Resolves the photographer profiles of users that a given user is following (following list).
+ */
+export async function fetchUserFollowing(params: {
+  userId: string;
+  idToken: string;
+  limit?: number;
+}): Promise<{
+  userId: string;
+  totalFollowing: number;
+  following: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    profilePhotoUrl: string | null;
+    profileUrl: string;
+  }>;
+}> {
+  const userProfile = await fetchUserProfile({ userId: params.userId, idToken: params.idToken });
+  const followingIds: string[] = Array.isArray(userProfile?.following) ? userProfile.following : [];
+  const limit = Math.min(params.limit || 20, 50);
+  const selectedIds = followingIds.slice(0, limit);
+
+  const following = await Promise.all(
+    selectedIds.map(async (uid) => {
+      let profile: Record<string, any> | null = null;
+      try {
+        profile = await fetchUserProfile({ userId: uid, idToken: params.idToken });
+      } catch {
+        // Ignore single fetch error
+      }
+      const username = profile?.username || `user_${uid.substring(0, 8)}`;
+      return {
+        userId: uid,
+        username,
+        displayName: profile?.displayName || profile?.name || username,
+        profilePhotoUrl: profile?.profilePhotoUrl || profile?.avatarUrl || null,
+        profileUrl: `https://the.fotoapp.co/app/profile?userId=${uid}`
+      };
+    })
+  );
+
+  return {
+    userId: params.userId,
+    totalFollowing: followingIds.length,
+    following
+  };
+}
+
+/**
+ * Fetches community ambassador and featured photographers from `ambassador-usernames` or curated top creators.
+ */
+export async function fetchFeaturedPhotographers(params: {
+  idToken: string;
+  limit?: number;
+}): Promise<{
+  count: number;
+  featuredPhotographers: Array<{
+    userId: string;
+    username: string;
+    displayName: string;
+    bio: string;
+    profilePhotoUrl: string | null;
+    profileUrl: string;
+    samplePostIds: string[];
+  }>;
+}> {
+  const queryUrl = `https://firestore.googleapis.com/v1/projects/${FOTO_FIREBASE_CONFIG.projectId}/databases/(default)/documents:runQuery`;
+  const limit = Math.min(params.limit || 10, 25);
+
+  const usernames: string[] = [];
+  try {
+    const res = await fetch(queryUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.idToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "ambassador-usernames" }],
+          limit
+        }
+      })
+    });
+    if (res.ok) {
+      const rows = (await res.json()) as any[];
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (row.document?.name) {
+            const docId = row.document.name.split("/").pop();
+            if (docId) usernames.push(docId);
+          }
+        }
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // Fallback to top curated tags discovery if ambassador-usernames collection is empty
+  if (usernames.length === 0) {
+    const fallbackTags = ["Portrait", "Street", "Landscape", "Fine Art", "Analog"];
+    const candidateUids = new Set<string>();
+    for (const tag of fallbackTags) {
+      const posts = await fetchTagShardPosts({ tag, shard: 0, idToken: params.idToken });
+      for (const p of posts.slice(0, 3)) {
+        const parts = p.split("-");
+        if (parts.length >= 3) {
+          candidateUids.add(parts[1]);
+        }
+      }
+      if (candidateUids.size >= limit) break;
+    }
+
+    const profiles = await Promise.all(
+      Array.from(candidateUids).slice(0, limit).map(uid => fetchUserProfile({ userId: uid, idToken: params.idToken }))
+    );
+
+    const ambassadors = profiles
+      .filter((p): p is Record<string, any> => Boolean(p && p.username))
+      .map(p => ({
+        userId: p.userId,
+        username: p.username,
+        displayName: p.displayName || p.name || p.username,
+        bio: p.bio || "",
+        profilePhotoUrl: p.profilePhotoUrl || p.avatarUrl || null,
+        profileUrl: `https://the.fotoapp.co/app/profile?userId=${p.userId}`,
+        samplePostIds: Array.isArray(p.postIds) ? p.postIds.slice(-3) : []
+      }));
+
+    return {
+      count: ambassadors.length,
+      featuredPhotographers: ambassadors
+    };
+  }
+
+  const resolved = await Promise.all(
+    usernames.map(async (uname) => {
+      const uid = await resolveUserByUsername({ username: uname, idToken: params.idToken });
+      if (!uid) return null;
+      const prof = await fetchUserProfile({ userId: uid, idToken: params.idToken });
+      if (!prof) return null;
+      return {
+        userId: uid,
+        username: prof.username || uname,
+        displayName: prof.displayName || prof.name || uname,
+        bio: prof.bio || "",
+        profilePhotoUrl: prof.profilePhotoUrl || prof.avatarUrl || null,
+        profileUrl: `https://the.fotoapp.co/app/profile?userId=${uid}`,
+        samplePostIds: Array.isArray(prof.postIds) ? prof.postIds.slice(-3) : []
+      };
+    })
+  );
+
+  const ambassadors = resolved.filter((p): p is NonNullable<typeof p> => p !== null);
+  return {
+    count: ambassadors.length,
+    featuredPhotographers: ambassadors
+  };
+}
+
+/**
+ * Dismisses or deletes a notification from the user's `notifications` collection.
+ */
+export async function dismissNotificationInFirestore(params: {
+  notificationId: string;
+  idToken: string;
+}): Promise<boolean> {
+  return await deleteFirestoreDocument({
+    collectionPath: "notifications",
+    documentId: params.notificationId,
+    idToken: params.idToken
+  });
+}
+
+/**
+ * Fetches a curated explore/discovery feed across major photographic genres.
+ */
+export async function fetchExploreFeed(params: {
+  idToken: string;
+  limit?: number;
+  tags?: string[];
+}): Promise<Array<Record<string, any>>> {
+  const exploreTags = params.tags && params.tags.length > 0
+    ? params.tags
+    : ["Landscape", "Street", "Portrait", "Analog", "Fine Art", "Architecture", "Black and White"];
+
+  const candidatePostIds = new Set<string>();
+  for (const tag of exploreTags) {
+    try {
+      const shardPosts = await fetchTagShardPosts({ tag, shard: 0, idToken: params.idToken });
+      for (const pid of shardPosts.slice(-5)) {
+        candidatePostIds.add(pid);
+      }
+    } catch {
+      // Continue
+    }
+  }
+
+  const limit = Math.min(params.limit || 20, 50);
+  const uniqueIds = Array.from(candidatePostIds).slice(0, limit * 2);
+  const postDocs = await fetchPostsDocuments({ postIds: uniqueIds, idToken: params.idToken });
+
+  return postDocs.slice(0, limit).map(doc => ({
+    postId: doc.postId || "",
+    userId: doc.userId || "",
+    description: doc.description || "",
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    imageUrl: doc.imageUrl || (Array.isArray(doc.images) && doc.images[0]?.imageUrl) || "",
+    imageWidth: doc.imageWidth,
+    imageHeight: doc.imageHeight,
+    likesCount: Array.isArray(doc.likes) ? doc.likes.length : 0,
+    commentCount: typeof doc.commentCount === "number" ? doc.commentCount : 0,
+    timeStamp: doc.timeStamp,
+    postUrl: `https://the.fotoapp.co/app/profile?userId=${doc.userId}`
+  }));
+}
+
 

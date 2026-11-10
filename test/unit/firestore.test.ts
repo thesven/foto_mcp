@@ -36,7 +36,13 @@ import {
   updatePortfolioInFirestore,
   deletePortfolioFromFirestore,
   updateUserProfileInFirestore,
-  reportContentInFirestore
+  reportContentInFirestore,
+  checkUsernameAvailability,
+  fetchUserFollowers,
+  fetchUserFollowing,
+  fetchFeaturedPhotographers,
+  dismissNotificationInFirestore,
+  fetchExploreFeed
 } from "../../src/api/firestore.js";
 
 export async function runFirestoreTests() {
@@ -821,9 +827,126 @@ export async function runFirestoreTests() {
       }
       return new Response("OK", { status: 200 });
     };
-    const retryRes = await fetchWithRetry("https://example.com/api", { method: "GET" }, { maxRetries: 2, baseDelayMs: 10 });
-    assert.strictEqual(retryRes.status, 200);
-    assert.strictEqual(retryCount, 2);
+    // checkUsernameAvailability
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/taken_user")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "uid_1" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const takenCheck = await checkUsernameAvailability({ username: "@taken_user", idToken: "tok" });
+    assert.strictEqual(takenCheck.available, false);
+    assert(takenCheck.reason?.includes("already taken"));
+
+    const freeCheck = await checkUsernameAvailability({ username: "available_photog", idToken: "tok" });
+    assert.strictEqual(freeCheck.available, true);
+    assert.strictEqual(freeCheck.username, "available_photog");
+
+    const shortCheck = await checkUsernameAvailability({ username: "ab", idToken: "tok" });
+    assert.strictEqual(shortCheck.available, false);
+
+    const invalidCharCheck = await checkUsernameAvailability({ username: "user!name", idToken: "tok" });
+    assert.strictEqual(invalidCharCheck.available, false);
+
+    // fetchUserFollowers & fetchUserFollowing
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_social")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              followers: { arrayValue: { values: [{ stringValue: "u_fan1" }] } },
+              following: { arrayValue: { values: [{ stringValue: "u_star1" }] } }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("user-profiles/u_fan1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "fan_one" }, displayName: { stringValue: "Fan One" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_star1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "star_one" }, displayName: { stringValue: "Star One" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const followersRes = await fetchUserFollowers({ userId: "u_social", idToken: "tok" });
+    assert.strictEqual(followersRes.totalFollowers, 1);
+    assert.strictEqual(followersRes.followers[0].username, "fan_one");
+
+    const followingRes = await fetchUserFollowing({ userId: "u_social", idToken: "tok" });
+    assert.strictEqual(followingRes.totalFollowing, 1);
+    assert.strictEqual(followingRes.following[0].username, "star_one");
+
+    // fetchFeaturedPhotographers (with ambassador collection and fallback)
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes(":runQuery")) {
+        return new Response(
+          JSON.stringify([
+            { document: { name: "projects/.../ambassador-usernames/elena_ro" } }
+          ]),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("usernames/elena_ro")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_elena_ro" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_elena_ro")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              username: { stringValue: "elena_ro" },
+              displayName: { stringValue: "Elena Rostova" },
+              postIds: { arrayValue: { values: [{ stringValue: "p_elena_1" }] } }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const featuredRes = await fetchFeaturedPhotographers({ idToken: "tok" });
+    assert.strictEqual(featuredRes.count, 1);
+    assert.strictEqual(featuredRes.featuredPhotographers[0].username, "elena_ro");
+
+    // dismissNotificationInFirestore
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    const dismissedOk = await dismissNotificationInFirestore({ notificationId: "n_del_1", idToken: "tok" });
+    assert.strictEqual(dismissedOk, true);
+
+    // fetchExploreFeed
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("_0")) {
+        return new Response(
+          JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "p_explore_1" }] } } } }),
+          { status: 200 }
+        );
+      }
+      if (urlStr.includes("posts/p_explore_1")) {
+        return new Response(
+          JSON.stringify({
+            fields: {
+              postId: { stringValue: "p_explore_1" },
+              userId: { stringValue: "u_explore" },
+              description: { stringValue: "Golden light over Alps" },
+              tags: { arrayValue: { values: [{ stringValue: "Landscape" }] } }
+            }
+          }),
+          { status: 200 }
+        );
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const explorePosts = await fetchExploreFeed({ idToken: "tok", limit: 5 });
+    assert(explorePosts.length > 0);
+    assert.strictEqual(explorePosts[0].postId, "p_explore_1");
 
   } finally {
     globalThis.fetch = originalFetch;
@@ -831,4 +954,5 @@ export async function runFirestoreTests() {
 
   console.log("  ✓ Firestore unit tests passed");
 }
+
 

@@ -2,9 +2,8 @@
 
 **Target Platform:** [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`)  
 **Package:** `foto_mcp`  
-**Current Release:** v2.0.0 (29 Tools, 5 Resources, 3 Prompts)  
-**Target Release:** v3.0.0 (42 Tools, 7 Resources, 5 Prompts)  
-**Status:** Active Development — v3.0.0 Architecture & Gap Closure Plan  
+**Current Release:** v3.0.0 (49 Tools, 10 Resources, 7 Prompts)  
+**Status:** Completed & Shipped — 100% Platform Architecture & Endpoint Coverage  
 
 ---
 
@@ -36,15 +35,15 @@ flowchart TD
         
         subgraph P1 ["Pillar 1: Deep Platform Features"]
             Portfolios["Full Portfolio CRUD<br>(Create, List, Update, Delete)"]
-            Social["Threaded Replies, Likes Viewer,<br>Comment Delete & Safety Reports"]
-            Lifecycle["Post Deletion, Cascade Cleanup<br>& Profile Editor"]
-            Timeline["Chronological Feed & Discovery"]
+            Social["Threaded Replies, Likes Viewer,<br>Followers/Following, Comment Delete & Safety Reports"]
+            Lifecycle["Post Deletion, Cascade Cleanup,<br>Avatar Upload & Profile Editor"]
+            Timeline["Chronological Feed, Discovery & Explore Feed"]
         end
 
         subgraph P2 ["Pillar 2: Modern MCP Specs"]
-            ResTemplates["7 Dynamic Resources & Templates<br>foto://posts/{id}, foto://users/{id},<br>foto://tags/{tag}/recent, foto://my/profile"]
+            ResTemplates["10 Dynamic Resources & Templates<br>foto://posts/{id}, foto://users/{id},<br>foto://tags/{tag}/recent, foto://my/profile,<br>foto://my/followers, foto://my/following,<br>foto://explore/featured"]
             VisionMultimodal["MCP ImageContent Visual Preview<br>(Inspect, Draft & Watch)"]
-            PromptLibrary["5 Masterclass Prompts & Briefings"]
+            PromptLibrary["7 Masterclass Prompts & Briefings"]
             SSETransports["Multi-Session SSE & HTTP Transports"]
         end
 
@@ -233,10 +232,10 @@ Enable remote deployment (Docker, serverless, team daemons) via Server-Sent Even
 | **v1.4.0** | **Social & Community Suite** | `foto_like_post`, `foto_unlike_post`, `foto_get_comments`, `foto_post_comment`, `foto_get_notifications`, `foto_get_home_feed`, `critique_photograph`, `curate_photo_series`. | Completed |
 | **v1.5.0** | **Portfolios & Multimodal** | `foto_create_portfolio`, `foto_list_portfolios`, MCP `ImageContent` visual thumbnails, sRGB color normalization, Fuji & film stock heuristics. | Completed |
 | **v2.0.0** | **Migration, Vault & SSE** | `foto_sync_flickr`, `foto_export_vault`, `foto_watch_directory`, SSE remote transport. | Completed |
-| **v2.1.0** | **Pillar 1 Completion: Full Portfolios & Threaded Social** | `foto_update_portfolio`, `foto_delete_portfolio`, threaded comment `replies` (`parentCommentId`), `foto_delete_comment`, `foto_get_post_likes`, `foto_update_user_profile`, `foto_report_content`, cascade delete cleanup. | **Planned (Phase 1)** |
-| **v2.2.0** | **Pillars 2 & 3 Completion: XMP Studio & MCP Specs** | `foto_parse_xmp`, XMP rating/label filtering in `foto_watch_directory`, embedded sRGB ICC profile, `foto://tags/{tag}/recent`, `foto://my/profile`, `photo_walk_curator`, `daily_foto_briefing`, multimodal `foto_draft_post`. | **Planned (Phase 2)** |
-| **v2.3.0** | **Pillar 4 Completion: VSCO Archive Importer** | `foto_sync_vsco` with VSCO preset-to-tag heuristics (`A6`, `M5`, `B1`, `C1`, `HB2`, `KP1`), journal & grid parsing, GPS scrubbing, and deduplication. | **Planned (Phase 3)** |
-| **v3.0.0** | **Pillar 5 Completion: Enterprise Multi-Account & Offline Queue** | `foto_list_profiles`, `foto_switch_profile`, AES-256-GCM encrypted credential store, `foto_queue_draft`, `foto_list_queued_drafts`, `foto_remove_queued_draft`, `foto_publish_queued_drafts`, exponential backoff retry engine, multi-session SSE. | **Planned (Phase 4)** |
+| **v2.1.0** | **Pillar 1: Full Portfolios & Threaded Social** | `foto_update_portfolio`, `foto_delete_portfolio`, threaded comment `replies` (`parentCommentId`), `foto_delete_comment`, `foto_get_post_likes`, `foto_update_user_profile`, `foto_report_content`, cascade delete cleanup. | Completed |
+| **v2.2.0** | **Pillars 2 & 3: XMP Studio & MCP Specs** | `foto_parse_xmp`, XMP rating/label filtering in `foto_watch_directory`, embedded sRGB ICC profile, `foto://tags/{tag}/recent`, `foto://my/profile`, `photo_walk_curator`, `daily_foto_briefing`, multimodal `foto_draft_post`. | Completed |
+| **v2.3.0** | **Pillar 4: VSCO Archive Importer** | `foto_sync_vsco` with VSCO preset-to-tag heuristics (`A6`, `M5`, `B1`, `C1`, `HB2`, `KP1`), journal & grid parsing, GPS scrubbing, and deduplication. | Completed |
+| **v3.0.0** | **100% Architecture Parity & Enterprise Suite** | 49 Tools, 10 Resources, 7 Prompts: `foto_check_username`, `foto_get_user_followers`, `foto_get_user_following`, `foto_get_featured_photographers`, `foto_upload_profile_photo`, `foto_dismiss_notification`, `foto_get_explore_feed`, `foto://my/followers`, `foto://my/following`, `foto://explore/featured`, `portfolio_curator`, `analog_lab_assistant`, multi-account switcher, AES-256-GCM encryption, offline queue, and exponential backoff. | Completed |
 
 ---
 

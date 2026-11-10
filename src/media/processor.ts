@@ -291,3 +291,18 @@ export async function prepareImageForUpload(filePath: string): Promise<PreparedI
   };
 }
 
+/**
+ * Prepares a profile avatar photo:
+ * Crops and resizes to 400x400 square, normalizes to sRGB with embedded sRGB ICC profile,
+ * strips GPS, and encodes to quality 85% JPEG.
+ */
+export async function prepareAvatarImage(filePath: string): Promise<Buffer> {
+  return await sharp(filePath)
+    .rotate()
+    .toColorspace("srgb")
+    .withIccProfile("srgb")
+    .resize(400, 400, { fit: "cover", position: "center" })
+    .jpeg({ quality: 85, progressive: true })
+    .toBuffer();
+}
+

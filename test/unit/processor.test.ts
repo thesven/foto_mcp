@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import sharp from "sharp";
-import { inspectImage, prepareImageForUpload, generateImagePreview } from "../../src/media/processor.js";
+import { inspectImage, prepareImageForUpload, generateImagePreview, prepareAvatarImage } from "../../src/media/processor.js";
 
 export async function runProcessorTests() {
   console.log("--- Testing Media Processor module ---");
@@ -124,6 +124,13 @@ export async function runProcessorTests() {
 
     const inspNoPreview = await inspectImage(squarePath, { preview: false });
     assert.strictEqual(inspNoPreview.previewBase64, undefined);
+
+    // 5. prepareAvatarImage test (400x400 square crop, JPEG)
+    const avatarBuf = await prepareAvatarImage(portraitPath);
+    const avatarMeta = await sharp(avatarBuf).metadata();
+    assert.strictEqual(avatarMeta.width, 400);
+    assert.strictEqual(avatarMeta.height, 400);
+    assert.strictEqual(avatarMeta.format, "jpeg");
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

@@ -647,6 +647,128 @@ export async function runFotoClientTests() {
     assert.strictEqual(parsedXmpClient.rating, 5);
     assert.strictEqual(parsedXmpClient.colorLabel, "Green");
 
+    // checkUsername
+    const invalidFormat = await client.checkUsername("a");
+    assert.strictEqual(invalidFormat.available, false);
+    assert(invalidFormat.reason?.includes("between 3 and 30 characters"));
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("usernames/taken_user")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_other" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const availRes = await client.checkUsername("available_user");
+    assert.strictEqual(availRes.available, true);
+    const takenRes = await client.checkUsername("taken_user");
+    assert.strictEqual(takenRes.available, false);
+
+    // getUserFollowers
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_target")) {
+        return new Response(JSON.stringify({ fields: { followers: { arrayValue: { values: [{ stringValue: "u_follower1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_follower1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "follower_one" }, displayName: { stringValue: "Follower One" } } }), { status: 200 });
+      }
+      if (urlStr.includes("usernames/target_handle")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_target" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const followersRes = await client.getUserFollowers({ username: "target_handle" });
+    assert.strictEqual(followersRes.totalFollowers, 1);
+    assert.strictEqual(followersRes.followers[0].username, "follower_one");
+    await assert.rejects(async () => client.getUserFollowers({ username: "nonexistent_target" }), /not found/);
+
+    // getUserFollowing
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("user-profiles/u_client_test") || urlStr.includes("user-profiles/u_me")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [{ stringValue: "u_following1" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_following1")) {
+        return new Response(JSON.stringify({ fields: { username: { stringValue: "following_one" }, displayName: { stringValue: "Following One" } } }), { status: 200 });
+      }
+      if (urlStr.includes("usernames/target_handle")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_target" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_target")) {
+        return new Response(JSON.stringify({ fields: { following: { arrayValue: { values: [] } } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const followingRes = await client.getUserFollowing();
+    assert.strictEqual(followingRes.totalFollowing, 1);
+    assert.strictEqual(followingRes.following[0].username, "following_one");
+    const targetFollowing = await client.getUserFollowing({ username: "target_handle" });
+    assert.strictEqual(targetFollowing.totalFollowing, 0);
+    await assert.rejects(async () => client.getUserFollowing({ username: "nonexistent_target" }), /not found/);
+
+    // getFeaturedPhotographers
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes(":runQuery")) {
+        return new Response(JSON.stringify([
+          { document: { name: "projects/.../ambassador-usernames/ambassador_user" } }
+        ]), { status: 200 });
+      }
+      if (urlStr.includes("usernames/ambassador_user")) {
+        return new Response(JSON.stringify({ fields: { userId: { stringValue: "u_amb" } } }), { status: 200 });
+      }
+      if (urlStr.includes("user-profiles/u_amb")) {
+        return new Response(JSON.stringify({
+          fields: {
+            username: { stringValue: "ambassador_user" },
+            displayName: { stringValue: "Ambassador Creator" },
+            bio: { stringValue: "Street ambassador" }
+          }
+        }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const featured = await client.getFeaturedPhotographers(5);
+    assert.strictEqual(featured.count, 1);
+    assert.strictEqual(featured.featuredPhotographers[0].username, "ambassador_user");
+
+    // uploadProfilePhoto
+    globalThis.fetch = async (url: any) => {
+      const urlStr = String(url);
+      if (urlStr.includes("firebasestorage.googleapis.com")) {
+        return new Response(JSON.stringify({ name: "avatars/u_client_test/avatar_123.jpg", downloadTokens: "tok-avatar" }), { status: 200 });
+      }
+      if (urlStr.includes("firestore.googleapis.com")) {
+        return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    const avatarRes = await client.uploadProfilePhoto(img1);
+    assert.strictEqual(avatarRes.success, true);
+    assert(avatarRes.profilePhotoUrl.includes("avatars"));
+    await assert.rejects(async () => client.uploadProfilePhoto(""), /filePath is required/);
+
+    // dismissNotification
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    const dismissRes = await client.dismissNotification("notif_to_del");
+    assert.strictEqual(dismissRes.success, true);
+    await assert.rejects(async () => client.dismissNotification(""), /notificationId is required/);
+
+    // getExploreFeed
+    globalThis.fetch = async (url: any) => {
+      const urlStr = decodeURIComponent(String(url));
+      if (urlStr.includes("_0")) {
+        return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "p_exp_c" }] } } } }), { status: 200 });
+      }
+      if (urlStr.includes("posts/p_exp_c")) {
+        return new Response(JSON.stringify({ fields: { postId: { stringValue: "p_exp_c" }, userId: { stringValue: "u_exp" }, description: { stringValue: "Explore photo" } } }), { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+    const exploreFeed = await client.getExploreFeed({ limit: 5 });
+    assert(exploreFeed.length > 0);
+    assert.strictEqual(exploreFeed[0].postId, "p_exp_c");
+
     await clearCredentials();
   } finally {
     globalThis.fetch = originalFetch;
