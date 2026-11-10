@@ -1,6 +1,6 @@
 {
   "name": "foto_mcp",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "An MCP (Model Context Protocol) server for Foto App",
   "main": "dist/index.js",
   "type": "module",

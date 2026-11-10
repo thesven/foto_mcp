@@ -1,6 +1,6 @@
 # Foto MCP Server (`foto_mcp`)
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-3.0.1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Coverage](https://img.shields.io/badge/coverage-94.7%25-brightgreen.svg)]()
 [![Node Version](https://img.shields.io/badge/node-%3E%3D20.9.0-orange.svg)]()
