@@ -343,12 +343,12 @@ export async function runFirestoreTests() {
     // fetchTagIndexMeta
     globalThis.fetch = async (url: any) => {
       const urlStr = decodeURIComponent(String(url));
-      if (urlStr.includes("Fine Art Nude_meta")) {
+      if (urlStr.includes("Wildlife_meta")) {
         return new Response(JSON.stringify({ fields: { currentShard: { integerValue: "1" }, postCount: { integerValue: "420" } } }), { status: 200 });
       }
       return new Response("", { status: 404 });
     };
-    const metaFound = await fetchTagIndexMeta({ tag: "Fine Art Nude", idToken: "tok" });
+    const metaFound = await fetchTagIndexMeta({ tag: "Wildlife", idToken: "tok" });
     assert.strictEqual(metaFound?.currentShard, 1);
     assert.strictEqual(metaFound?.postCount, 420);
 
@@ -358,12 +358,12 @@ export async function runFirestoreTests() {
     // fetchTagShardPosts
     globalThis.fetch = async (url: any) => {
       const urlStr = decodeURIComponent(String(url));
-      if (urlStr.includes("Fine Art Nude_0")) {
+      if (urlStr.includes("Wildlife_0")) {
         return new Response(JSON.stringify({ fields: { posts: { arrayValue: { values: [{ stringValue: "post_1" }, { stringValue: "post_2" }] } } } }), { status: 200 });
       }
       return new Response("", { status: 404 });
     };
-    const shardPosts = await fetchTagShardPosts({ tag: "Fine Art Nude", shard: 0, idToken: "tok" });
+    const shardPosts = await fetchTagShardPosts({ tag: "Wildlife", shard: 0, idToken: "tok" });
     assert.deepStrictEqual(shardPosts, ["post_1", "post_2"]);
 
     const shardPostsEmpty = await fetchTagShardPosts({ tag: "Empty", shard: 0, idToken: "tok" });

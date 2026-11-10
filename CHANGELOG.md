@@ -129,8 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Tag Browsing & Photographer Discovery Tools (13 Total MCP Tools)**:
-  - `foto_browse_tag`: Browse recent public posts under any of Foto's 303 curated tags (including `Fine Art Nude`, `Boudoir`, `Street`, `Landscape`, `Analog`, etc.) with shard navigation and pagination.
-  - `foto_find_photographers_by_tag`: Search and discover photographers who publish under a specific curated genre or aesthetic tag (e.g., `Fine Art Nude`, `Boudoir`, `Portrait`). Aggregates posts from tag shards, resolves author profiles, bios, follower/post stats, and provides direct profile links with sample works.
+  - `foto_browse_tag`: Browse recent public posts under any of Foto's 303 curated tags (including `Wildlife`, `Street`, `Landscape`, `Portrait`, `Analog`, etc.) with shard navigation and pagination.
+  - `foto_find_photographers_by_tag`: Search and discover photographers who publish under a specific curated genre or aesthetic tag (e.g., `Wildlife`, `Landscape`, `Portrait`, `Street`). Aggregates posts from tag shards, resolves author profiles, bios, follower/post stats, and provides direct profile links with sample works.
 - **Firestore Tag Discovery Engine**:
   - Implemented `fetchTagIndexMeta`, `fetchTagShardPosts`, `fetchPostDocument`, and `fetchPostsDocuments` for reading inverted sharded tag indexes and post documents in Cloud Firestore.
 - **Test Suite Expansion**:

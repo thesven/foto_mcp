@@ -52,7 +52,7 @@ flowchart TD
 * **Adobe Lightroom / Capture One `.xmp` Sidecar Integration:** Automatically discovers and parses `.xmp` sidecar files alongside images for star ratings (`xmp:Rating`), color labels (`xmp:Label`), titles, captions, hierarchical keywords, and film stocks.
 * **Technical EXIF Preservation:** Parses camera body, lens model, ISO, aperture ($f$-number), shutter speed, and focal length into Foto's `image-private-metadata` system so technical details are preserved for photography enthusiasts.
 * **Curated 303 Tag Taxonomy:** Strictly enforces Foto's platform rule of **1 to 3 tags** selected exclusively from the official whitelist of **303 curated photographic tags**. Completely eliminates hashtag spam.
-* **Photographer, Ambassador & Content Discovery:** Query Foto's inverted sharded index (`tag_index`), community `ambassador-usernames`, and curated explore feeds to find recent posts and discover active photographers publishing under any genre (`Fine Art Nude`, `Boudoir`, `Street`, `Landscape`, `Analog`).
+* **Photographer, Ambassador & Content Discovery:** Query Foto's inverted sharded index (`tag_index`), community `ambassador-usernames`, and curated explore feeds to find recent posts and discover active photographers publishing under any genre (`Wildlife`, `Street`, `Landscape`, `Portrait`, `Analog`).
 * **Full Portfolio & Social Graph Lifecycle:** Create, update, list, and delete multi-image Portfolios; traverse follower/following graphs; check `@username` handle availability; read and write threaded comment replies; inspect post likers; upload 400x400 avatar photos; dismiss notifications; and submit community safety reports.
 * **Universal Archive Migration (`Instagram`, `Flickr`, `VSCO`):** Migrate photography exports with automatic hashtag scrubbing, VSCO film preset mapping (`A6`, `M5`, `B1`, `HP5`, `Portra`), GPS stripping, and deduplication.
 * **Multi-Account Switcher & Offline Draft Queue:** Switch between named Foto accounts (`default`, `street`, `studio`) encrypted at rest with AES-256-GCM, and stage validated posts into a persistent local draft queue for batch publishing.
@@ -188,7 +188,7 @@ export FOTO_PASSWORD="your_password"
 | `foto_suggest_tags` | Suggests 1 to 3 valid tags from the 303 curated tags list based on caption, gear notes, film stock, or Fuji film simulations. | `caption?`, `cameraInfo?`, `keywords?` |
 | `foto_search_tags` | Searches the 303 curated tags whitelist by prefix or keyword. | `query`, `limit?` |
 | `foto_browse_tag` | Browse recent public posts under any of Foto's 303 curated tags with shard and pagination support. | `tag`, `limit?`, `shard?` |
-| `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Fine Art Nude`, `Boudoir`, `Portrait`, `Street`). | `tag`, `limit?` |
+| `foto_find_photographers_by_tag` | Finds active photographers publishing under a curated tag (e.g. `Wildlife`, `Landscape`, `Portrait`, `Street`, `Analog`). | `tag`, `limit?` |
 | `foto_get_featured_photographers` | Retrieves official community ambassadors and featured photographers on Foto (`ambassador-usernames` or curated top creators). | `limit?` |
 | `foto_get_explore_feed` | Retrieves a curated explore feed of recent public works aggregated across major photographic genres. | `limit?`, `tags?` |
 | `foto_follow_user` | Follows one or more photographers on Foto by user ID(s) via atomic Firestore `:commit` transforms. | `userId?`, `userIds?` |
@@ -329,20 +329,20 @@ Claude runs `foto_sync_instagram`:
 }
 ```
 
-### 6. Finding Photographers Posting Under "Fine Art Nude"
-> *"Find photographers on Foto who post nudes."*
+### 6. Finding Photographers Posting Under "Wildlife"
+> *"Find photographers on Foto who post wildlife and nature photography."*
 
-Claude queries Foto's taxonomy with `foto_search_tags`, identifies canonical tags `Fine Art Nude` and `Boudoir`, and runs `foto_find_photographers_by_tag`:
+Claude queries Foto's taxonomy with `foto_search_tags`, identifies canonical tags `Wildlife` and `Nature`, and runs `foto_find_photographers_by_tag`:
 ```json
 {
-  "tag": "Fine Art Nude",
+  "tag": "Wildlife",
   "photographerCount": 2,
   "photographers": [
     {
       "userId": "Q7rrA5L9okTVO4g36bsTZUEZ2Cu2",
-      "username": "elena_fineart",
+      "username": "elena_wild",
       "displayName": "Elena Rostova",
-      "bio": "Shadows, form, and medium format film portraiture.",
+      "bio": "Alpine wildlife, avian migration, and medium format nature studies.",
       "postCount": 42,
       "followerCount": 1850,
       "profileUrl": "https://the.fotoapp.co/app/profile?userId=Q7rrA5L9okTVO4g36bsTZUEZ2Cu2",
@@ -350,8 +350,8 @@ Claude queries Foto's taxonomy with `foto_search_tags`, identifies canonical tag
         {
           "postId": "20261109155500-Q7rrA5L9okTVO4g36bsTZUEZ2Cu2-aB3k9XyZ",
           "imageUrl": "https://firebasestorage.googleapis.com/v0/b/foto-d963e.appspot.com/o/...",
-          "description": "Form study in low key tungsten lighting.",
-          "tags": ["Fine Art Nude", "Medium Format", "Studio"]
+          "description": "Great Grey Owl emerging from early morning boreal mist.",
+          "tags": ["Wildlife", "Birds", "Nature"]
         }
       ]
     }

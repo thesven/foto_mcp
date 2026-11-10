@@ -403,9 +403,9 @@ server.tool(
 // Tool 12: foto_browse_tag
 server.tool(
   "foto_browse_tag",
-  "Browse recent public posts on Foto under a curated tag (e.g. 'Fine Art Nude', 'Boudoir', 'Street', 'Landscape', 'Analog').",
+  "Browse recent public posts on Foto under a curated tag (e.g. 'Wildlife', 'Street', 'Landscape', 'Portrait', 'Analog').",
   {
-    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Fine Art Nude', 'Boudoir', 'Street')"),
+    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Wildlife', 'Street', 'Landscape')"),
     limit: z.number().int().positive().max(50).optional().describe("Maximum number of posts to return (default: 20)"),
     shard: z.number().int().min(0).optional().describe("Specific tag index shard number (defaults to latest shard)")
   },
@@ -432,9 +432,9 @@ server.tool(
 // Tool 13: foto_find_photographers_by_tag
 server.tool(
   "foto_find_photographers_by_tag",
-  "Find photographers on Foto who publish under a specific curated tag (such as 'Fine Art Nude', 'Boudoir', 'Portrait', 'Street', etc.). Resolves user profiles, bios, stats, and profile URLs.",
+  "Find photographers on Foto who publish under a specific curated tag (such as 'Wildlife', 'Landscape', 'Portrait', 'Street', 'Analog'). Resolves user profiles, bios, stats, and profile URLs.",
   {
-    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Fine Art Nude', 'Boudoir')"),
+    tag: z.string().describe("Curated tag name from Foto's 303 allowed tags list (e.g. 'Wildlife', 'Landscape', 'Portrait')"),
     limit: z.number().int().positive().max(25).optional().describe("Maximum number of photographers to return (default: 10)")
   },
   async ({ tag, limit }) => {
