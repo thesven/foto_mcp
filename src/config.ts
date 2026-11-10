@@ -1,8 +1,16 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pkgPath = path.resolve(__dirname, "..", "package.json");
+const pkgJson = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as { version?: string };
+
+export const SERVER_VERSION = pkgJson.version || "3.0.0";
 
 export const FOTO_FIREBASE_CONFIG = {
   apiKey: "AIzaSyAzY7D38b_8Eqr49H8fmptHEN39bPy35lw",

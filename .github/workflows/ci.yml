@@ -2,22 +2,38 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
   pull_request:
-    branches: [main]
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
+    name: Test & Coverage (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     strategy:
       fail-fast: false
       matrix:
         node-version: [20.x, 22.x, 24.x]
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
@@ -29,8 +45,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build
+      - name: Build TypeScript
         run: npm run build
 
-      - name: Run Tests
+      - name: Run Unit & Integration Tests (>90% Coverage Enforced)
         run: npm test
+
+      - name: Verify Package Tarball & Semver Engine
+        if: matrix.node-version == '22.x'
+        run: |
+          npm pack --dry-run
+          npm run release:check

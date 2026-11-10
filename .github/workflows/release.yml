@@ -1,0 +1,143 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force_bump:
+        description: "Optional manual semver bump override (major, minor, patch, or none)"
+        required: false
+        type: choice
+        options:
+          - ""
+          - patch
+          - minor
+          - major
+          - none
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  id-token: write
+
+jobs:
+  release:
+    name: Semantic Release & Publish
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.event.head_commit.message, 'chore(release):') && !contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - name: Checkout repository with full history and tags
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js 22.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Full Quality Gate (Typecheck, Build & >90% Coverage Tests)
+        run: |
+          npm run typecheck
+          npm run build
+          npm test
+
+      - name: Resolve PR Labels for Merged Commit (if any)
+        id: pr_labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LABELS=""
+          PR_JSON=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" 2>/dev/null || echo "[]")
+          if [ -n "$PR_JSON" ] && [ "$PR_JSON" != "[]" ]; then
+            LABELS=$(echo "$PR_JSON" | jq -r '.[0].labels // [] | map(.name) | join(",")' 2>/dev/null || echo "")
+          fi
+          echo "Detected PR labels: ${LABELS}"
+          echo "labels=${LABELS}" >> "$GITHUB_OUTPUT"
+
+      - name: Analyze Commits & Semver Tags
+        id: analyze
+        env:
+          PR_LABELS: ${{ steps.pr_labels.outputs.labels }}
+        run: |
+          FORCE_ARG=""
+          if [ -n "${{ github.event.inputs.force_bump }}" ]; then
+            FORCE_ARG="--bump ${{ github.event.inputs.force_bump }}"
+          fi
+          npx tsx scripts/release.ts --github-output $FORCE_ARG
+
+      - name: Apply Version Bump, Update Changelog & Build Release Artifacts
+        if: steps.analyze.outputs.should_release == 'true'
+        env:
+          PR_LABELS: ${{ steps.pr_labels.outputs.labels }}
+        run: |
+          FORCE_ARG=""
+          if [ -n "${{ github.event.inputs.force_bump }}" ]; then
+            FORCE_ARG="--bump ${{ github.event.inputs.force_bump }}"
+          fi
+          npx tsx scripts/release.ts --apply $FORCE_ARG
+          npm run build
+          npm test
+
+      - name: Commit Version Bump, Create Semver Tag & Push to Main
+        if: steps.analyze.outputs.should_release == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add package.json CHANGELOG.md README.md
+          if [ -f package-lock.json ]; then
+            git add package-lock.json
+          fi
+
+          NEXT_VER="${{ steps.analyze.outputs.next_version }}"
+          NEXT_TAG="${{ steps.analyze.outputs.next_tag }}"
+          BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
+
+          git commit -m "chore(release): ${NEXT_TAG} (${BUMP_TYPE}) [skip ci]"
+          git tag -a "${NEXT_TAG}" -m "Release ${NEXT_TAG}"
+          git push origin HEAD:main --follow-tags
+
+      - name: Create GitHub Release with Categorized Notes
+        if: steps.analyze.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT_TAG="${{ steps.analyze.outputs.next_tag }}"
+          BUMP_TYPE="${{ steps.analyze.outputs.bump_type }}"
+          NOTES_FILE="${{ steps.analyze.outputs.notes_file }}"
+
+          gh release create "${NEXT_TAG}" \
+            --title "${NEXT_TAG} (${BUMP_TYPE} release)" \
+            --notes-file "${NOTES_FILE}" \
+            --verify-tag
+
+      - name: Publish to npm Registry (if NPM_TOKEN is configured)
+        if: steps.analyze.outputs.should_release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN}" ]; then
+            echo "NPM_TOKEN detected — publishing foto_mcp@${{ steps.analyze.outputs.next_version }} to npm..."
+            npm publish --access public --provenance
+          else
+            echo "No NPM_TOKEN secret configured; skipping npm registry publish (GitHub Release & tag published)."
+          fi
+
+      - name: Clean Up Temporary Release Notes File
+        if: always()
+        run: rm -f .release-notes.md

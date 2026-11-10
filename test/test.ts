@@ -30,6 +30,7 @@ import { runXmpTests } from "./unit/xmp.test.js";
 import { runVscoTests } from "./unit/vsco.test.js";
 import { runQueueTests } from "./unit/queue.test.js";
 import { runMcpServerTests } from "./unit/mcp-server.test.js";
+import { runSemverTests } from "./unit/semver.test.js";
 
 async function runTests() {
   console.log("=== Running Foto MCP Test Suite ===\n");
@@ -247,6 +248,7 @@ async function runTests() {
   await runVscoTests();
   await runQueueTests();
   await runMcpServerTests();
+  await runSemverTests();
 
   console.log("\n=== All Tests Passed Successfully! ===");
 }

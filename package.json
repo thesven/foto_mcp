@@ -24,6 +24,8 @@
     "dev": "tsx src/index.ts",
     "test": "NODE_ENV=test FOTO_MCP_TEST=true c8 --check-coverage --lines 90 --statements 90 --functions 90 tsx test/test.ts",
     "test:coverage": "NODE_ENV=test FOTO_MCP_TEST=true c8 --reporter=html --reporter=text tsx test/test.ts",
+    "release:check": "tsx scripts/release.ts",
+    "release:apply": "tsx scripts/release.ts --apply",
     "prepublishOnly": "npm run build && npm test"
   },
   "repository": {

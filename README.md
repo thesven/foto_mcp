@@ -411,7 +411,7 @@ npm run build
 ```
 
 ### Running Test Suite with >90% Coverage
-The test suite includes 10 end-to-end integration flows and 15 modular unit test suites across all components (`firestore`, `auth`, `storage`, `moderation`, `processor`, `tags`, `foto-client`, `instagram`, `flickr`, `vault`, `watcher`, `xmp`, `vsco`, `queue`, and `mcp-server`).
+The test suite includes 10 end-to-end integration flows and 16 modular unit test suites across all components (`firestore`, `auth`, `storage`, `moderation`, `processor`, `tags`, `foto-client`, `instagram`, `flickr`, `vault`, `watcher`, `xmp`, `vsco`, `queue`, `mcp-server`, and `semver`).
 
 ```bash
 # Run tests and verify >90% coverage
@@ -419,6 +419,9 @@ npm test
 
 # Generate HTML coverage report
 npm run test:coverage
+
+# Preview next semantic version bump and release notes from git history
+npm run release:check
 ```
 
 Current test coverage breakdown:
@@ -426,16 +429,29 @@ Current test coverage breakdown:
 -----------------|---------|----------|---------|---------|
 File             | % Stmts | % Branch | % Funcs | % Lines |
 -----------------|---------|----------|---------|---------|
-All files        |   94.67 |    78.49 |    98.3 |   94.67 |
+All files        |   95.01 |    79.64 |   98.43 |   95.01 |
  src/config.ts   |     100 |       80 |     100 |     100 |
  src/foto-client |   98.45 |    85.28 |     100 |   98.45 |
  src/tags.ts     |     100 |      100 |     100 |     100 |
  src/api/*       |   95.12 |    77.12 |   98.48 |   95.12 |
  src/media/*     |   96.96 |    72.32 |   92.85 |   96.96 |
+ src/release/*   |   98.79 |    90.90 |     100 |   98.79 |
  src/sync/*      |   91.94 |    72.47 |     100 |   91.94 |
  src/index.ts    |    91.2 |    82.26 |      50 |    91.2 |
 -----------------|---------|----------|---------|---------|
 ```
+
+### Branch-Based Development & Automated Semantic Release Pipeline
+
+All new development is performed on dedicated feature/fix branches (`feat/*`, `fix/*`, `perf/*`, `docs/*`) and merged into `main` via Pull Request (see [CONTRIBUTING.md](CONTRIBUTING.md)):
+
+1. **Automated CI Matrix (`.github/workflows/ci.yml`):** Every branch push and Pull Request runs `typecheck`, `build`, `npm test` (>90% coverage gate), and package tarball verification across Node.js `20.x`, `22.x`, and `24.x`.
+2. **Semantic Release & Publish on `main` (`.github/workflows/release.yml`):** Pushing or merging to `main` inspects the latest `vX.Y.Z` semver Git tag, commit messages, and PR labels (`semver:major`, `semver:minor`, `semver:patch`, `semver:skip`):
+   - `feat!:` / `BREAKING CHANGE:` / `semver:major` → **Major** version bump (`vX+1.0.0`)
+   - `feat:` / `semver:minor` → **Minor** version bump (`vX.Y+1.0`)
+   - `fix:` / `perf:` / `refactor:` / `semver:patch` → **Patch** version bump (`vX.Y.Z+1`)
+   - `docs:` / `chore:` / `ci:` / `test:` / `semver:skip` → **No release** (`none`, skips publish)
+   - When a release is required, GitHub Actions automatically updates `package.json`, `CHANGELOG.md`, and the `README.md` badge, commits `chore(release): vX.Y.Z [skip ci]`, pushes the annotated semver tag, creates the official GitHub Release, and publishes to npm (when `NPM_TOKEN` is configured).
 
 ---
 
