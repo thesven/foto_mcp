@@ -2,13 +2,13 @@
 
 [![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-95.2%25-brightgreen.svg)]()
+[![Coverage](https://img.shields.io/badge/coverage-94.7%25-brightgreen.svg)]()
 [![Node Version](https://img.shields.io/badge/node-%3E%3D20.9.0-orange.svg)]()
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
 
 An official Model Context Protocol (MCP) server for [Foto](https://fotoapp.co/) (`fotoapp.co` / `the.fotoapp.co`), the photography-first social platform.
 
-This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos and `.xmp` sidecars, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, and portfolios, manage multi-account profiles and offline draft queues, watch local studio edit folders, migrate archives from Instagram, Flickr, and VSCO directly to your chronological Foto feed, discover photographers across Foto's 303 curated tags, and backup complete vaults.
+This MCP server equips AI assistants (Claude Desktop, Cursor, Zed, Windsurf, and custom agent runtimes) to seamlessly inspect local photos and `.xmp` sidecars, extract camera EXIF metadata, select from Foto's official curated taxonomy, publish single frames, multi-image series, and portfolios, manage multi-account profiles and offline draft queues, watch local studio edit folders, migrate archives from Instagram, Flickr, and VSCO directly to your chronological Foto feed, discover photographers and ambassadors across Foto's 303 curated tags, and backup complete vaults.
 
 ---
 
@@ -20,16 +20,16 @@ flowchart TD
     
     subgraph Foto_MCP ["Foto MCP Server v3.0.0 (foto_mcp)"]
         Tools["49 Native MCP Tools<br>10 Resources & 7 Prompts"]
-        Proc["Sharp, Exifr & XMP Pipeline<br>• Max 1820px Zero-Crop<br>• Embedded sRGB ICC Profile<br>• Strips GPS & Thumbnails<br>• Parses Camera EXIF & .xmp Sidecars"]
+        Proc["Sharp, Exifr & XMP Pipeline<br>• Max 1820px Zero-Crop & 400x400 Avatars<br>• Embedded sRGB ICC Profile<br>• Strips GPS & Thumbnails<br>• Parses Camera EXIF & .xmp Sidecars"]
         Auth["Multi-Profile Firebase Auth<br>• AES-256-GCM Encrypted Storage<br>• Named Account Switcher<br>• Auto Token Refresh (60s buffer)"]
         Sync["Migration, Queue & Archival Suite<br>• Instagram, Flickr & VSCO Sync<br>• Offline Draft Queue & Batch Publish<br>• Vault Exporter & Watch Folder Monitor"]
-        Discovery["Discovery & Social Graph Engine<br>• Inverted Sharded Tag Index<br>• Threaded Comments, Likes & Profiles"]
+        Discovery["Discovery & Social Graph Engine<br>• Inverted Sharded Tag Index & Explore Feed<br>• Followers, Following & Ambassadors<br>• Threaded Comments, Likes & Profiles"]
     end
     
     subgraph Foto_Cloud ["Foto Cloud Infrastructure (foto-d963e)"]
-        Storage["Firebase Storage<br>posts/{userId}/{imageId}_{ts}"]
+        Storage["Firebase Storage<br>posts/ • portfolios/ • avatars/"]
         Sightengine["Sightengine Moderation<br>nudity-2.1 Check"]
-        Firestore["Cloud Firestore<br>• posts/{postId}<br>• image-private-metadata/{id}<br>• user-profiles/{userId}<br>• tag_index/{tag}_{shard}<br>• comments & replies"]
+        Firestore["Cloud Firestore (15 Collections)<br>• posts, user-profiles & usernames<br>• image-private-metadata & tag_index<br>• comments, replies & notifications<br>• ambassador-usernames & safety reports"]
     end
 
     Client <-->|"Stdio or Multi-Session SSE"| Tools
@@ -52,8 +52,8 @@ flowchart TD
 * **Adobe Lightroom / Capture One `.xmp` Sidecar Integration:** Automatically discovers and parses `.xmp` sidecar files alongside images for star ratings (`xmp:Rating`), color labels (`xmp:Label`), titles, captions, hierarchical keywords, and film stocks.
 * **Technical EXIF Preservation:** Parses camera body, lens model, ISO, aperture ($f$-number), shutter speed, and focal length into Foto's `image-private-metadata` system so technical details are preserved for photography enthusiasts.
 * **Curated 303 Tag Taxonomy:** Strictly enforces Foto's platform rule of **1 to 3 tags** selected exclusively from the official whitelist of **303 curated photographic tags**. Completely eliminates hashtag spam.
-* **Photographer & Content Discovery:** Query Foto's inverted sharded index (`tag_index`) to find recent posts and discover active photographers publishing under any curated genre (such as `Fine Art Nude`, `Boudoir`, `Street`, `Landscape`, or `Analog`).
-* **Full Portfolio & Social Graph Lifecycle:** Create, update, list, and delete multi-image Portfolios; read and write threaded comment replies; inspect post likers; update your user profile; and submit community safety reports.
+* **Photographer, Ambassador & Content Discovery:** Query Foto's inverted sharded index (`tag_index`), community `ambassador-usernames`, and curated explore feeds to find recent posts and discover active photographers publishing under any genre (`Fine Art Nude`, `Boudoir`, `Street`, `Landscape`, `Analog`).
+* **Full Portfolio & Social Graph Lifecycle:** Create, update, list, and delete multi-image Portfolios; traverse follower/following graphs; check `@username` handle availability; read and write threaded comment replies; inspect post likers; upload 400x400 avatar photos; dismiss notifications; and submit community safety reports.
 * **Universal Archive Migration (`Instagram`, `Flickr`, `VSCO`):** Migrate photography exports with automatic hashtag scrubbing, VSCO film preset mapping (`A6`, `M5`, `B1`, `HP5`, `Portra`), GPS stripping, and deduplication.
 * **Multi-Account Switcher & Offline Draft Queue:** Switch between named Foto accounts (`default`, `street`, `studio`) encrypted at rest with AES-256-GCM, and stage validated posts into a persistent local draft queue for batch publishing.
 
@@ -380,12 +380,27 @@ Claude invokes `foto_follow_user` with single `userId` or bulk `userIds`:
 }
 ```
 
+### 8. Filtering Studio Exports by Lightroom `.xmp` Rating & Color Label
+> *"Scan my `~/Pictures/Lightroom_Exports` folder for 5-star Green-labeled selects and stage them into my offline draft queue."*
+
+Claude runs `foto_watch_directory` with `minRating: 5` and `colorLabel: "Green"`, inspects the multimodal sRGB `ImageContent` previews alongside `.xmp` metadata (`foto_parse_xmp`), and stages each select via `foto_queue_draft`. When back online, Claude batch-publishes the queue via `foto_manage_draft_queue` (`action: "publish"`).
+
+### 9. Creating & Updating a Curated Portfolio Showcase
+> *"Create a Portfolio called 'Nordic Horizons' from these 6 landscape images with the second frame as cover, then update the artist statement."*
+
+Claude runs `foto_create_portfolio` (`coverIndex: 1`, `coverAlignmentX: 0.5`, `tags: ["Landscape", "Analog"]`) and refines the showcase anytime with `foto_update_portfolio`.
+
+### 10. VSCO & Flickr Archive Migration
+> *"Migrate my VSCO export at `~/Downloads/vsco_export/posts.json` and map my film presets to Foto tags."*
+
+Claude runs `foto_sync_vsco`, automatically mapping VSCO presets (`A6`, `M5`, `B1`, `HP5`, `KP1`) to Foto's canonical tags (`Analog`, `Film`, `Black and White`, `Portrait`), scrubbing GPS metadata, and deduplicating against existing posts.
+
 ---
 
 ## Build from Source & Developer Guide
 
 ### Prerequisites
-* Node.js v18.0.0 or later
+* Node.js v20.9.0 or later (Node 20 LTS, 22 LTS, or 24 LTS)
 * npm v9 or later
 
 ```bash
@@ -396,7 +411,7 @@ npm run build
 ```
 
 ### Running Test Suite with >90% Coverage
-The test suite includes end-to-end integration flows and modular unit test suites across all components.
+The test suite includes 10 end-to-end integration flows and 15 modular unit test suites across all components (`firestore`, `auth`, `storage`, `moderation`, `processor`, `tags`, `foto-client`, `instagram`, `flickr`, `vault`, `watcher`, `xmp`, `vsco`, `queue`, and `mcp-server`).
 
 ```bash
 # Run tests and verify >90% coverage
@@ -411,14 +426,14 @@ Current test coverage breakdown:
 -----------------|---------|----------|---------|---------|
 File             | % Stmts | % Branch | % Funcs | % Lines |
 -----------------|---------|----------|---------|---------|
-All files        |   97.82 |    82.58 |   96.61 |   97.82 |
- src/config.ts   |     100 |      100 |     100 |     100 |
- src/foto-client |   99.33 |    78.31 |     100 |   99.33 |
+All files        |   94.67 |    78.49 |    98.3 |   94.67 |
+ src/config.ts   |     100 |       80 |     100 |     100 |
+ src/foto-client |   98.45 |    85.28 |     100 |   98.45 |
  src/tags.ts     |     100 |      100 |     100 |     100 |
- src/api/*       |   98.07 |    86.44 |     100 |   98.07 |
- src/media/*     |   94.88 |    63.93 |      80 |   94.88 |
- src/sync/*      |   98.81 |    84.05 |     100 |   98.81 |
- src/index.ts    |   93.77 |    82.85 |      50 |   93.77 |
+ src/api/*       |   95.12 |    77.12 |   98.48 |   95.12 |
+ src/media/*     |   96.96 |    72.32 |   92.85 |   96.96 |
+ src/sync/*      |   91.94 |    72.47 |     100 |   91.94 |
+ src/index.ts    |    91.2 |    82.26 |      50 |    91.2 |
 -----------------|---------|----------|---------|---------|
 ```
 
@@ -426,9 +441,10 @@ All files        |   97.82 |    82.58 |   96.61 |   97.82 |
 
 ## Troubleshooting & FAQ
 
-### Session Expiration
+### Session Expiration & Multi-Profile Management
 * If you see `"Stored credentials invalid"` or `"Authentication token expired"`, simply prompt the assistant: *"Log in to my Foto account with email `...` and password `...`"* or call `foto_login`.
-* To completely reset all local stored sessions, call `foto_logout` or delete `~/.config/foto-mcp/credentials.json`.
+* Use `foto_list_profiles` and `foto_switch_profile` to inspect or switch between saved accounts (`default`, `street`, `studio`, etc.).
+* To reset stored sessions, call `foto_logout` or remove `~/.config/foto-mcp/profiles.json` and `~/.config/foto-mcp/credentials.json`.
 
 ### Content Moderation Rejection
 * Foto automatically evaluates photos using Sightengine (`nudity-2.1`). If an image exceeds platform safety limits (sexual activity > 0.7 or sexual display > 0.9), it will be blocked to protect your account standing.
