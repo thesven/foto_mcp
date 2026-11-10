@@ -169,6 +169,19 @@ export async function runFirestoreTests() {
     });
     assert.strictEqual(notFound, null);
 
+    // getFirestoreDocument with spaces in documentId (e.g. tag index docs)
+    let requestedUrl = "";
+    globalThis.fetch = async (url: any) => {
+      requestedUrl = String(url);
+      return new Response(JSON.stringify({ fields: { postCount: { integerValue: "10" } } }), { status: 200 });
+    };
+    await getFirestoreDocument({
+      collectionPath: "tag_index",
+      documentId: "Black and White_meta",
+      idToken: "token123"
+    });
+    assert(requestedUrl.includes("Black%20and%20White_meta"), "Document ID with spaces must be URL-encoded");
+
     // getFirestoreDocument - 200 success
     globalThis.fetch = async () => {
       return new Response(

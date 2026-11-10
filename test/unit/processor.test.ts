@@ -81,9 +81,22 @@ export async function runProcessorTests() {
     const customPortraitPath = path.join(tempDir, "custom_portrait.jpg");
     await sharp({ create: { width: 1000, height: 2100, channels: 3, background: { r: 50, g: 50, b: 50 } } }).jpeg().toFile(customPortraitPath);
     const customPortraitInsp = await inspectImage(customPortraitPath);
-    assert.strictEqual(customPortraitInsp.aspectRatioFormatted, "1:2.10");
+    // EXIF orientation (orientation 6: Rotate 90 CW - storage 3000x2000 becomes 2000x3000 portrait)
+    const orientedPath = path.join(tempDir, "oriented_exif_6.jpg");
+    await sharp({ create: { width: 3000, height: 2000, channels: 3, background: { r: 60, g: 70, b: 80 } } })
+      .withMetadata({ orientation: 6 })
+      .jpeg()
+      .toFile(orientedPath);
+    const orientedInsp = await inspectImage(orientedPath);
+    assert.strictEqual(orientedInsp.originalWidth, 2000);
+    assert.strictEqual(orientedInsp.originalHeight, 3000);
+    assert.strictEqual(orientedInsp.aspectRatioFormatted, "2:3 (Portrait)");
+    assert.strictEqual(orientedInsp.targetUploadDimensions.width, 1213);
+    assert.strictEqual(orientedInsp.targetUploadDimensions.height, 1820);
 
-    // 2. GIF detection and rejection
+    const orientedPrepared = await prepareImageForUpload(orientedPath);
+    assert.strictEqual(orientedPrepared.width, 1213);
+    assert.strictEqual(orientedPrepared.height, 1820);
     const gifPath = path.join(tempDir, "animation.gif");
     await sharp({ create: { width: 10, height: 10, channels: 3, background: { r: 0, g: 0, b: 0 } } }).gif().toFile(gifPath);
     const gifInsp = await inspectImage(gifPath);

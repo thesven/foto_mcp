@@ -87,7 +87,7 @@ export async function runXmpTests() {
 
     await fs.writeFile(
       xmpPath,
-      `<x:xmpmeta><rdf:RDF><rdf:Description><xmp:Rating>4</xmp:Rating><xmp:Label>Green</xmp:Label><tiff:Make>Leica</tiff:Make><tiff:Model>M11</tiff:Model></rdf:Description></rdf:RDF></x:xmpmeta>`,
+      `<x:xmpmeta><rdf:RDF><rdf:Description><xmp:Rating>4</xmp:Rating><xmp:Label>Green</xmp:Label><tiff:Make>Leica</tiff:Make><tiff:Model>M11</tiff:Model><lens:LensModel>Voigtlander Nokton 35mm f/1.2</lens:LensModel></rdf:Description></rdf:RDF></x:xmpmeta>`,
       "utf-8"
     );
 
@@ -98,6 +98,7 @@ export async function runXmpTests() {
     assert.strictEqual(parsedFromImg.rating, 4);
     assert.strictEqual(parsedFromImg.colorLabel, "Green");
     assert.strictEqual(parsedFromImg.cameraMake, "Leica");
+    assert.strictEqual(parsedFromImg.lensModel, "Voigtlander Nokton 35mm f/1.2");
 
     // 3. Verify inspectImage automatically attaches xmp metadata and prepareImageForUpload embeds sRGB ICC
     const inspection = await inspectImage(imgPath, { preview: false });

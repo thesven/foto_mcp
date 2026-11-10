@@ -99,6 +99,10 @@ export async function runTagTests() {
   const exact = suggestTags({ keywords: ["Ambrotype", "Castle"] });
   assert(exact.suggestedTags.includes("Ambrotype") || exact.suggestedTags.includes("Castle"));
 
+  // Tag containing regex metacharacters (e.g. LGBTQ+)
+  const lgbtqTest = suggestTags({ caption: "Celebrating the LGBTQ+ community in bright colors" });
+  assert(lgbtqTest.suggestedTags.includes("LGBTQ+"), "Must accurately suggest LGBTQ+ without regex error");
+
   // Default fallback when no rules match
   const fallback = suggestTags({ caption: "xyz 123 completely unrelated gibberish qwerty" });
   assert.strictEqual(fallback.suggestedTags[0], "Everyday Life");

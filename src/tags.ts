@@ -456,7 +456,10 @@ export function suggestTags(params: {
   for (const tag of FOTO_ALLOWED_TAGS) {
     if (suggestions.size >= 3) break;
     const lower = tag.toLowerCase();
-    const regex = new RegExp(`\\b${lower}\\b`, "i");
+    const escaped = lower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const prefixBoundary = /^\w/.test(lower) ? "\\b" : "(?:^|\\s|[.,!?;:(])";
+    const suffixBoundary = /\w$/.test(lower) ? "\\b" : "(?:$|\\s|[.,!?;:)])";
+    const regex = new RegExp(`${prefixBoundary}${escaped}${suffixBoundary}`, "i");
     if (regex.test(textToScan) && !suggestions.has(tag)) {
       suggestions.add(tag);
       notes.push(`Matched exact tag: ${tag}`);

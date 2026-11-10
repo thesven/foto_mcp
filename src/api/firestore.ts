@@ -99,7 +99,8 @@ export async function setFirestoreDocument(params: {
 }): Promise<Record<string, any>> {
   const { collectionPath, documentId, data, idToken } = params;
 
-  const url = `${FIRESTORE_BASE_URL}/${collectionPath}/${documentId}`;
+  const encodedDocId = encodeURIComponent(documentId);
+  const url = `${FIRESTORE_BASE_URL}/${collectionPath}/${encodedDocId}`;
   const fields: Record<string, any> = {};
   for (const [k, v] of Object.entries(data)) {
     if (v !== undefined) {
@@ -135,7 +136,8 @@ export async function getFirestoreDocument(params: {
   idToken: string;
 }): Promise<Record<string, any> | null> {
   const { collectionPath, documentId, idToken } = params;
-  const url = `${FIRESTORE_BASE_URL}/${collectionPath}/${documentId}`;
+  const encodedDocId = encodeURIComponent(documentId);
+  const url = `${FIRESTORE_BASE_URL}/${collectionPath}/${encodedDocId}`;
 
   const response = await fetch(url, {
     method: "GET",
@@ -488,7 +490,8 @@ export async function deleteFirestoreDocument(params: {
   documentId: string;
   idToken: string;
 }): Promise<boolean> {
-  const url = `${FIRESTORE_BASE_URL}/${params.collectionPath}/${params.documentId}`;
+  const encodedDocId = encodeURIComponent(params.documentId);
+  const url = `${FIRESTORE_BASE_URL}/${params.collectionPath}/${encodedDocId}`;
   const res = await fetch(url, {
     method: "DELETE",
     headers: {
